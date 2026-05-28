@@ -26,6 +26,20 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    task_default_queue="celery",
+    task_create_missing_queues=True,
+    task_routes={
+        # 手动/定时行情数据任务走独立队列，避免被 LLM/PDF 等慢任务堵住。
+        "app.tasks.data_tasks.backfill_stock_data": {"queue": "data"},
+        "app.tasks.data_tasks.repair_watchlist_sync_gaps": {"queue": "data"},
+        "app.tasks.data_tasks.refresh_watchlist_data": {"queue": "data"},
+        "app.tasks.data_tasks.update_realtime_quotes": {"queue": "data"},
+        "app.tasks.data_tasks.update_all_fundamentals": {"queue": "data"},
+        "app.tasks.data_tasks.update_profit_forecasts": {"queue": "data"},
+        "app.tasks.data_tasks.refresh_all_watchlist": {"queue": "data"},
+        "app.tasks.data_tasks.daily_after_close_routine": {"queue": "data"},
+        "app.tasks.analysis_tasks.calc_all_indicators": {"queue": "data"},
+    },
     # 定时任务
     beat_schedule={
         # 交易日行情更新（9:30-15:00，每15秒）
@@ -34,7 +48,19 @@ celery_app.conf.update(
             "task": "app.tasks.data_tasks.update_realtime_quotes",
             "schedule": settings.quote_update_interval_seconds,
         },
-        # 每日收盘后计算技术指标（16:00）
+        # 每 5 分钟自愈扫描：补救新增自选股回填任务丢失、卡住或失败。
+        "repair-watchlist-sync-gaps": {
+            "task": "app.tasks.data_tasks.repair_watchlist_sync_gaps",
+            "schedule": crontab(minute="*/5"),
+        },
+        # 每个交易日盘后刷新自选股核心数据（日 K + 技术指标 + 基本面 + 盈利预测 + v5）。
+        # 这一步必须早于后续事件检测/日报生成，否则下游会继续使用旧 K 线。
+        # Celery 配置 timezone=Asia/Shanghai；15:40 即北京时间盘后。
+        "refresh-watchlist-after-close": {
+            "task": "app.tasks.data_tasks.refresh_watchlist_data",
+            "schedule": crontab(hour=15, minute=40, day_of_week="1-5"),
+        },
+        # 每日收盘后计算技术指标（16:00，作为盘后刷新失败时的轻量兜底）
         "calc-indicators-daily": {
             "task": "app.tasks.analysis_tasks.calc_all_indicators",
             "schedule": crontab(hour=16, minute=0),
@@ -105,10 +131,20 @@ celery_app.conf.update(
             "task": "app.tasks.data_tasks.update_profit_forecasts",
             "schedule": crontab(hour=4, minute=30, day_of_week=0),
         },
-        # 财报公告专项爬取（每30分钟）- 确保第一时间捕获业绩预告/快报
+        # 财报公告专项爬取（每30分钟,AKShare 兜底)- 沪市/北交所 + 深市补漏
         "crawl-disclosures": {
             "task": "app.tasks.news_tasks.crawl_disclosures_only",
             "schedule": crontab(minute="*/30"),
+        },
+        # P0 升级:巨潮直连深市公告(Tier-A 5min,比 AKShare 快 6x)
+        "crawl-cninfo-disclosures": {
+            "task": "app.tasks.news_tasks.crawl_cninfo_disclosures",
+            "schedule": crontab(minute="*/5"),
+        },
+        # P0 升级:消费 mystock-x-crawler 推送的 Redis 队列(Tier-A 5min)
+        "consume-x-tweets": {
+            "task": "app.tasks.news_tasks.consume_x_tweets",
+            "schedule": crontab(minute="*/5"),
         },
         # 券商研报：每天盘前 09:15 与 盘后 16:30 各一次
         "crawl-research-morning": {

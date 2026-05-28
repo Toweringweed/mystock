@@ -3,7 +3,7 @@
 输入：公司基础信息（名称 / 行业 / 业务板块 / 上下游）
 输出：3~8 个标签 [{name, category, confidence}]，类别为 theme / industry_chain / attribute
 
-走 ai_analyzer.llm_client.call_llm 统一 fallback (OpenRouter → OpenAI → Anthropic)。
+走 ai_analyzer.llm_client.call_llm 统一 fallback (DeepSeek → OpenRouter → OpenAI → Anthropic)。
 """
 import json
 import logging

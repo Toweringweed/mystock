@@ -442,6 +442,26 @@ class ReportGenerator:
                     pass
             return str(getattr(settings, key, "") or "")
 
+        # ── DeepSeek(OpenAI-compatible) ───────────────────────────────
+        try:
+            ds_key = await _get("deepseek_api_key")
+            ds_model = await _get("deepseek_model") or settings.deepseek_model
+            ds_base_url = await _get("deepseek_base_url") or settings.deepseek_base_url
+            if ds_key:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=ds_key, base_url=ds_base_url)
+                kwargs = {
+                    "model": ds_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 3000,
+                }
+                if "reasoner" not in ds_model and "thinking" not in ds_model:
+                    kwargs["temperature"] = 0.3
+                resp = await client.chat.completions.create(**kwargs)
+                return resp.choices[0].message.content or "", ds_model
+        except Exception as e:
+            logger.warning(f"[{context.get('code')}] DeepSeek 报告生成失败，尝试下一个: {e}")
+
         # ── OpenRouter ────────────────────────────────────────────────
         try:
             or_key = await _get("openrouter_api_key")

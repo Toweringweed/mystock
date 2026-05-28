@@ -325,6 +325,154 @@ async def _fetch_and_save_research(db, code: str, stock_id: int) -> int:
     return saved
 
 
+@celery_app.task(name="app.tasks.news_tasks.consume_x_tweets")
+def consume_x_tweets():
+    """消费 mystock-x-crawler 写入 Redis 的推文队列,入库 industry_news"""
+    asyncio.run(_run_consume_x_tweets())
+
+
+async def _run_consume_x_tweets(batch_limit: int = 100):
+    import json as _json
+    from datetime import datetime as _dt
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from app.core.config import settings as _settings
+    from app.core.database import AsyncSessionLocal
+    from app.models.news import IndustryNews
+
+    try:
+        import redis.asyncio as _redis_async
+    except ImportError:
+        logger.error("redis 包未安装,跳过 consume_x_tweets")
+        return
+
+    redis = _redis_async.from_url(_settings.redis_url, decode_responses=True)
+
+    items: list[dict] = []
+    for _ in range(batch_limit):
+        raw = await redis.rpop("x_pending_tweets")
+        if not raw:
+            break
+        try:
+            items.append(_json.loads(raw))
+        except _json.JSONDecodeError:
+            continue
+
+    if not items:
+        return
+
+    async with AsyncSessionLocal() as db:
+        saved = 0
+        for it in items:
+            text = (it.get("text") or "").strip()
+            if not text:
+                continue
+            handle = it.get("handle") or "unknown"
+            tid = it.get("tweet_id") or ""
+            permalink = it.get("permalink") or ""
+            try:
+                published_at = _dt.fromisoformat(
+                    (it.get("published_at") or "").replace("Z", "+00:00")
+                )
+            except Exception:
+                published_at = _dt.now()
+
+            title = text[:200].replace("\n", " ").strip()
+            content_hash = hashlib.sha256(f"x:{tid}".encode()).hexdigest()
+
+            stmt = pg_insert(IndustryNews).values(
+                title=title,
+                content=text,
+                source=f"x_{handle}",
+                source_url=permalink,
+                published_at=published_at,
+                content_hash=content_hash,
+                related_industries=[],
+                category="social",
+                source_authority=0.5,  # social 中等权威
+            ).on_conflict_do_nothing(index_elements=["content_hash"])
+            r = await db.execute(stmt)
+            if r.rowcount:
+                saved += 1
+
+        await db.commit()
+        logger.info(f"[x_consume] 入库 {saved}/{len(items)} 条推文")
+
+
+@celery_app.task(name="app.tasks.news_tasks.crawl_cninfo_disclosures")
+def crawl_cninfo_disclosures():
+    """巨潮直连深市公告(Tier-A 5min,远比 AKShare 实时)。沪市/北交所走 crawl_disclosures_only。"""
+    asyncio.run(_run_cninfo_disclosures())
+
+
+async def _run_cninfo_disclosures():
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.models.news import IndustryNews, NewsStockRelation
+    from app.services.news_crawler.cninfo_crawler import CninfoCrawler
+    from app.services.stock_service import get_all_watchlist_codes_with_info
+
+    async with AsyncSessionLocal() as db:
+        stocks = await get_all_watchlist_codes_with_info(db)
+        if not stocks:
+            return
+
+        szse_stocks = [s for s in stocks if CninfoCrawler.supports(s["code"])]
+        if not szse_stocks:
+            logger.info("[cninfo] watchlist 无深市股票,跳过")
+            return
+
+        codes = [s["code"] for s in szse_stocks]
+        code_to_id = {s["code"]: s["id"] for s in szse_stocks}
+
+        crawler = CninfoCrawler()
+        results = await crawler.fetch_for_codes(codes, since_days=3, concurrency=4)
+
+        total_saved = 0
+        for code, items in results.items():
+            stock_id = code_to_id.get(code)
+            if not stock_id or not items:
+                continue
+            for item in items:
+                title = item["title"]
+                content_hash = hashlib.sha256(
+                    f"cninfo:{code}:{title}".encode()
+                ).hexdigest()
+
+                stmt = pg_insert(IndustryNews).values(
+                    title=title,
+                    content=item.get("content"),
+                    source=item["source"],
+                    source_url=item.get("source_url"),
+                    published_at=item["published_at"] or datetime.now(),
+                    content_hash=content_hash,
+                    related_industries=[],
+                    category=item.get("category", "announcement"),
+                    source_authority=item.get("source_authority", 1.0),
+                ).on_conflict_do_nothing(index_elements=["content_hash"])
+                result = await db.execute(stmt)
+
+                news_row = await db.execute(
+                    select(IndustryNews.id).where(
+                        IndustryNews.content_hash == content_hash
+                    )
+                )
+                news_id = news_row.scalar_one_or_none()
+                if not news_id:
+                    continue
+
+                rel_stmt = pg_insert(NewsStockRelation).values(
+                    news_id=news_id, stock_id=stock_id, relevance=1.0,
+                ).on_conflict_do_nothing()
+                await db.execute(rel_stmt)
+
+                if result.rowcount:
+                    total_saved += 1
+
+        await db.commit()
+        logger.info(f"[cninfo] 深市公告抓取完成,新增 {total_saved} 条 / {len(codes)} 只股票")
+
+
 async def _fetch_and_save_disclosures(db, code: str, stock_id: int) -> int:
     """财报公告：来源权威，初始 relevance=1.0，作为兜底关联"""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -668,20 +816,71 @@ async def _process_pipeline(db) -> int:
             importance_score=importance, title=news.title
         )
 
+        # ── P0 资讯升级:L0 催化剂 / 翻译 / L1.5 ──────────────────
+        from app.services.news_filter.catalyst_extractor import extract_catalyst
+        from app.services.news_filter.translator import translate_if_needed, detect_lang
+
+        # L0:对所有 news 跑(纯正则,便宜)
+        catalyst_type = extract_catalyst(news.title, news.content)
+
+        # 翻译:仅英文资讯,且尚未翻译过(original_lang 为 None 或 "en")
+        title_to_save = news.title
+        summary_for_llm = llm_out.summary if llm_out else news.summary
+        original_title_to_save = news.original_title
+        lang = news.original_lang or detect_lang(news.title)
+        if lang == "en" and not news.original_title:
+            title_zh, summary_zh, _ = await translate_if_needed(
+                db, title=news.title, summary=summary_for_llm or ""
+            )
+            if title_zh != news.title:  # 翻译成功
+                original_title_to_save = news.title
+                title_to_save = title_zh
+                if summary_zh:
+                    summary_for_llm = summary_zh
+
+        # L1.5:仅对 importance >= 0.5 的 news 跑(节省 LLM 调用)
+        catalyst_summary = news.catalyst_summary
+        key_risks = news.key_risks
+        l15_extracted_at = news.l15_extracted_at
+        if importance >= 0.5 and not l15_extracted_at:
+            from app.services.news_filter.catalyst_llm_extractor import (
+                extract_catalyst_and_risks,
+            )
+            cs, kr = await extract_catalyst_and_risks(
+                db,
+                title=title_to_save,
+                summary=summary_for_llm,
+                content=news.content,
+                catalyst_type=catalyst_type,
+            )
+            if cs:
+                catalyst_summary = cs
+            if kr:
+                key_risks = kr
+            l15_extracted_at = datetime.now()
+
         # 更新资讯字段
         await db.execute(
             update(IndustryNews)
             .where(IndustryNews.id == news_id)
             .values(
+                title=title_to_save,
                 simhash=simhash,
                 rule_score=rscore,
                 llm_score=float(llm_out.strength) if llm_out else None,
                 importance_score=importance,
                 direction=llm_out.direction if llm_out else None,
                 sentiment=llm_out.sentiment if llm_out else None,
-                summary=llm_out.summary if llm_out else news.summary,
+                summary=summary_for_llm,
                 urgency=urgency,
                 processed_at=datetime.now(),
+                # P0 新增字段
+                catalyst_type=catalyst_type,
+                catalyst_summary=catalyst_summary,
+                key_risks=key_risks,
+                original_title=original_title_to_save,
+                original_lang=lang,
+                l15_extracted_at=l15_extracted_at,
             )
         )
 

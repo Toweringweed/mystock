@@ -11,12 +11,16 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.analyst_report import AnalystReport
+from types import SimpleNamespace
+
 from app.models.backtest_infra import (
     BacktestSnapshot, InstitutionMetadata, QuarterlyFinancialsHistory, StockDailyFactor,
 )
 from app.models.estimate_revision import EstimateRevision
 from app.models.fundamental import ProfitForecast
+from app.models.kline import StockDailyKline
+from app.models.news import IndustryNews
+from app.models.research import ResearchReportMeta
 from app.models.stock import Stock
 from app.models.target_price_realtime import StockTargetPriceRealtime
 
@@ -58,6 +62,7 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
     today = date.today()
 
     # 1) 当前价 — 取最近交易日收盘价
+    # 优先 stock_daily_factors(含估值衍生),fallback 到 stock_daily_kline.close(原始 OHLCV)
     res = await db.execute(
         select(StockDailyFactor.close_price, StockDailyFactor.trade_date)
         .where(StockDailyFactor.stock_id == stock_id)
@@ -65,24 +70,81 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         .limit(1)
     )
     row = res.first()
-    if not row or not row.close_price:
-        return None
-    current_price = float(row.close_price)
+    if row and row.close_price:
+        current_price = float(row.close_price)
+    else:
+        res = await db.execute(
+            select(StockDailyKline.close, StockDailyKline.trade_date)
+            .where(StockDailyKline.stock_id == stock_id)
+            .order_by(StockDailyKline.trade_date.desc())
+            .limit(1)
+        )
+        kline_row = res.first()
+        if not kline_row or not kline_row.close:
+            return None
+        current_price = float(kline_row.close)
 
-    # 2) 取 30 天 / 90 天内的研报(用于上行空间 + 计数)
+    # 2) 取 30 天 / 60 天 / 90 天内的研报(用于上行空间 + 计数)
     cutoff_30d = today - timedelta(days=30)
+    cutoff_60d = today - timedelta(days=60)
     cutoff_90d = today - timedelta(days=90)
 
+    # 从 research_report_meta + industry_news 聚合 — research_report_meta 是 AKShare 抓的研报扩展表,
+    # join industry_news 拿 published_at 作为 report_date。
+    # research_report_meta 没有 target_price_a 字段, target_price 由 service 后续 fallback 到 eps_y1*pe_y1 推算。
     res = await db.execute(
-        select(AnalystReport)
+        select(
+            ResearchReportMeta.broker,
+            ResearchReportMeta.rating,
+            ResearchReportMeta.forecast_year_base,
+            ResearchReportMeta.eps_y1, ResearchReportMeta.eps_y2, ResearchReportMeta.eps_y3,
+            ResearchReportMeta.pe_y1, ResearchReportMeta.pe_y2, ResearchReportMeta.pe_y3,
+            ResearchReportMeta.pdf_url,
+            IndustryNews.published_at,
+            IndustryNews.summary,
+        )
+        .join(IndustryNews, ResearchReportMeta.news_id == IndustryNews.id)
         .where(and_(
-            AnalystReport.stock_id == stock_id,
-            AnalystReport.report_date >= cutoff_90d,
+            ResearchReportMeta.stock_id == stock_id,
+            IndustryNews.published_at.isnot(None),
+            IndustryNews.published_at >= datetime.combine(cutoff_90d, datetime.min.time()),
         ))
-        .order_by(AnalystReport.report_date.desc())
+        .order_by(IndustryNews.published_at.desc())
     )
-    all_reports_90d = list(res.scalars().all())
+    all_reports_90d = [
+        SimpleNamespace(
+            institution=row.broker,
+            report_date=row.published_at.date(),
+            rating=row.rating,
+            forecast_year_base=row.forecast_year_base,
+            eps_y1=row.eps_y1, eps_y2=row.eps_y2, eps_y3=row.eps_y3,
+            pe_y1=row.pe_y1, pe_y2=row.pe_y2, pe_y3=row.pe_y3,
+            target_price_a=None,    # research_report_meta 不含目标价,走 EPS×PE 推算
+            target_price_h=None,
+            net_profit_y1=None, net_profit_y2=None, net_profit_y3=None,
+            is_foreign=False,
+            summary=row.summary,
+            source_url=row.pdf_url,
+        )
+        for row in res.all()
+    ]
+
+    # 去重: 同 (institution, report_date) 仅保留 1 条 — AKShare 与 web_search 经常对同一研报
+    # 因 title 不同导致 content_hash 不同, 下游显示重复, 这里清理。优先目标价更新的(eps_y1*pe_y1 推算最大者)。
+    _dedup_map: dict[tuple[str, "date"], object] = {}
+    for r in all_reports_90d:
+        key = (r.institution, r.report_date)
+        prev = _dedup_map.get(key)
+        cur_tp = float(r.eps_y1) * float(r.pe_y1) if r.eps_y1 and r.pe_y1 else 0
+        prev_tp = float(prev.eps_y1) * float(prev.pe_y1) if prev and prev.eps_y1 and prev.pe_y1 else 0
+        if prev is None or cur_tp > prev_tp:
+            _dedup_map[key] = r
+    all_reports_90d = list(_dedup_map.values())
+
     reports_30d = [r for r in all_reports_90d if r.report_date >= cutoff_30d]
+    # 自适应加权窗口: 30 天 ≥2 篇 → 30d (优先新鲜度); 否则 60d (扩样本避免单家垄断)
+    weight_window_days = 30 if len(reports_30d) >= 2 else 60
+    cutoff_for_weight = cutoff_30d if weight_window_days == 30 else cutoff_60d
 
     if not all_reports_90d:
         # 没有任何机构覆盖 — 诚实标注
@@ -145,12 +207,16 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         meta = inst_meta.get(r.institution, {"weight": 1.0, "is_foreign": False, "type": "unknown"})
         weight = meta["weight"]
 
-        # 30 天内才参与加权计算(主信号)
-        if r.report_date >= cutoff_30d:
+        # 自适应加权窗口:30 天 ≥2 篇用 30d, 否则用 60d (在上方 weight_window_days 决策)
+        # 90 天内的所有研报仍展示在 breakdown table, 但只有 cutoff_for_weight 内的参与加权
+        if r.report_date >= cutoff_for_weight:
             target_prices_simple.append(tp)
             target_prices_weighted_num += tp * weight
             target_prices_weighted_den += weight
 
+        # 检测 fake EPS/PE: manual-add endpoint 在 target_price 无 EPS/PE 时用 (target_price, 1.0) 占位
+        # pe_y1 ≈ 1.0 是 fake 标志(真实研报 PE 不会 ≤1.5),fake 行 EPS/PE 都不返回(避免前端误导)
+        is_fake_eps = bool(r.pe_y1 and float(r.pe_y1) <= 1.5)
         breakdown_items.append({
             "institution": r.institution,
             "weight": round(weight, 2),
@@ -159,9 +225,12 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
             "rating": r.rating,
             "target_price": round(tp, 2),
             "target_derived": derived,  # 是否 EPS×PE 推算
-            "eps_y1": float(r.eps_y1) if r.eps_y1 else None,
-            "pe_y1": float(r.pe_y1) if r.pe_y1 else None,
+            "eps_y1": None if is_fake_eps else (float(r.eps_y1) if r.eps_y1 else None),
+            "eps_y2": float(r.eps_y2) if getattr(r, "eps_y2", None) else None,
+            "pe_y1": None if is_fake_eps else (float(r.pe_y1) if r.pe_y1 else None),
+            "pe_y2": float(r.pe_y2) if getattr(r, "pe_y2", None) else None,
             "freshness_days": (today - r.report_date).days,
+            "source_url": getattr(r, "source_url", None),
         })
 
     if not breakdown_items:
@@ -190,6 +259,26 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
     avg_target_simple = float(np.mean(target_prices_simple)) if target_prices_simple else avg_target_weighted
     highest = max(item["target_price"] for item in breakdown_items)
     lowest = min(item["target_price"] for item in breakdown_items)
+
+    # 5b) 研报反算加权远期 PE(用现价 / 机构 EPS 预测,过滤 fake EPS=target_price 的占位行)
+    # fake 行的特征是 pe_y1 == 1.0(manual-add 占位 trick),实际 PE 几乎不会是 1.0
+    fwd_pe_y1_num = 0.0
+    fwd_pe_y1_den = 0.0
+    fwd_pe_y2_num = 0.0
+    fwd_pe_y2_den = 0.0
+    for r in all_reports_90d:
+        meta = inst_meta.get(r.institution, {"weight": 1.0, "is_foreign": False, "type": "unknown"})
+        weight = meta["weight"]
+        # y1 (2026)
+        if r.eps_y1 and float(r.eps_y1) > 0 and (r.pe_y1 is None or float(r.pe_y1) > 1.5):
+            fwd_pe_y1_num += (current_price / float(r.eps_y1)) * weight
+            fwd_pe_y1_den += weight
+        # y2 (2027)
+        if getattr(r, "eps_y2", None) and float(r.eps_y2) > 0:
+            fwd_pe_y2_num += (current_price / float(r.eps_y2)) * weight
+            fwd_pe_y2_den += weight
+    weighted_forward_pe_y1 = round(fwd_pe_y1_num / fwd_pe_y1_den, 2) if fwd_pe_y1_den > 0 else None
+    weighted_forward_pe_y2 = round(fwd_pe_y2_num / fwd_pe_y2_den, 2) if fwd_pe_y2_den > 0 else None
 
     # 离散度(变异系数)
     prices_list = [item["target_price"] for item in breakdown_items]
@@ -336,6 +425,14 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
             "items": breakdown_items,
             "weighted_avg": round(avg_target_weighted, 3),
             "simple_avg": round(avg_target_simple, 3),
+            "weighted_forward_pe_y1": weighted_forward_pe_y1,
+            "weighted_forward_pe_y2": weighted_forward_pe_y2,
+            # 自适应加权窗口(30 或 60),前端据此显示文案
+            "weight_window_days": weight_window_days,
+            # 实际进入加权的研报数(去重后)
+            "reports_in_weight_window": len([
+                r for r in all_reports_90d if r.report_date >= cutoff_for_weight
+            ]),
         },
     }
     await _upsert_realtime(db, stock_id, payload)

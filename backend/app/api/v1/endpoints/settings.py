@@ -22,9 +22,15 @@ class TriggerTaskRequest(BaseModel):
 
 # 手工触发白名单：只允许 Celery 已注册的安全任务
 TRIGGERABLE_TASKS: dict[str, str] = {
+    # ── 一键 composite 操作(用户视角) ──────────────
+    "refresh_all_watchlist": "app.tasks.data_tasks.refresh_all_watchlist",
+    "daily_after_close_routine": "app.tasks.data_tasks.daily_after_close_routine",
+    "monthly_universe_refresh": "app.tasks.data_tasks.monthly_universe_refresh",
     # 数据采集
     "sync_stock_universe": "app.tasks.data_tasks.sync_stock_universe",
     "sync_universe_basic_data": "app.tasks.data_tasks.sync_universe_basic_data",
+    "repair_watchlist_sync_gaps": "app.tasks.data_tasks.repair_watchlist_sync_gaps",
+    "refresh_watchlist_data": "app.tasks.data_tasks.refresh_watchlist_data",
     "update_realtime_quotes": "app.tasks.data_tasks.update_realtime_quotes",
     "update_all_fundamentals": "app.tasks.data_tasks.update_all_fundamentals",
     "crawl_all_sources": "app.tasks.news_tasks.crawl_all_sources",
@@ -145,7 +151,8 @@ async def trigger_task(payload: TriggerTaskRequest):
             detail=f"未知任务 {payload.task_name}，可选: {list(TRIGGERABLE_TASKS.keys())}",
         )
     from app.tasks.celery_app import celery_app
-    result = celery_app.send_task(full_name)
+    kwargs = {"force": True} if payload.task_name == "update_realtime_quotes" else None
+    result = celery_app.send_task(full_name, kwargs=kwargs)
     logger.info(f"[trigger-task] {payload.task_name} → task_id={result.id}")
     return {
         "message": f"已提交任务 {payload.task_name}",
@@ -197,71 +204,109 @@ async def data_status(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import text as sql_text
 
+    # 每条:
+    #  expected_max_hours = 期望最大老化(小时);超过 → stale
+    #  trigger_task = 单点重触发的 Celery task key(对应 TRIGGERABLE_TASKS)
+    #  not_implemented = True 时即使 0 行也不算 broken,展示为"待实现"
     queries: list[dict] = [
+        # ── 自选股同步 ──────────────────────
+        {"group": "自选股", "table": "watchlist_sync", "expected_max_hours": 1,
+         "trigger_task": "repair_watchlist_sync_gaps", "unhealthy_when_stocks_gt_zero": True,
+         "sql": "SELECT count(*) AS rows, count(*) FILTER (WHERE data_ready IS FALSE OR sync_status IN ('pending','running','failed')) AS stocks, max(updated_at)::text AS latest FROM stocks WHERE is_watchlist IS TRUE",
+         "hint": "stocks=未就绪/同步中/失败的自选股数量"},
         # ── 行情 ────────────────────────────
-        {"group": "行情",   "table": "stock_daily_kline",
+        {"group": "行情", "table": "stock_daily_kline", "expected_max_hours": 24,
+         "trigger_task": "refresh_watchlist_data",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(trade_date)::text AS latest FROM stock_daily_kline",
          "hint": "日 K 线 OHLCV"},
-        {"group": "行情",   "table": "stock_technical_indicators",
+        {"group": "行情", "table": "stock_technical_indicators", "expected_max_hours": 24,
+         "trigger_task": "calc_all_indicators",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(trade_date)::text AS latest FROM stock_technical_indicators",
          "hint": "MA / MACD / RSI / KDJ / BOLL / 量比"},
-        {"group": "行情",   "table": "divergence_signals",
+        {"group": "行情", "table": "divergence_signals", "expected_max_hours": 48,
+         "trigger_task": "calc_all_indicators",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(detected_date)::text AS latest FROM divergence_signals",
          "hint": "MACD/RSI 顶/底背离"},
 
         # ── 财务/估值 ────────────────────────
-        {"group": "财务",   "table": "stock_fundamentals",
-         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(updated_at)::text AS latest FROM stock_fundamentals",
-         "hint": "PE / PB / PS / ROE / 营收 / 净利"},
-        {"group": "财务",   "table": "profit_forecasts",
+        {"group": "财务", "table": "stock_fundamentals (TTM)", "expected_max_hours": 24*7,
+         "trigger_task": "update_all_fundamentals",
+         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(updated_at)::text AS latest FROM stock_fundamentals WHERE period_type='ttm'",
+         "hint": "PE / PB / PS / ROE / 营收 / 净利(TTM)"},
+        {"group": "财务", "table": "stock_fundamentals (季度)", "expected_max_hours": 24*30,
+         "trigger_task": "update_all_fundamentals",
+         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(updated_at)::text AS latest FROM stock_fundamentals WHERE period_type='quarterly'",
+         "hint": "季度财报(同比/环比用,AKShare 抓取)"},
+        {"group": "财务", "table": "quarterly_financials_history", "expected_max_hours": 24*30,
+         "trigger_task": "update_all_fundamentals",
+         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(created_at)::text AS latest FROM quarterly_financials_history",
+         "hint": "季度走势历史(护城河变动追踪用)"},
+        {"group": "财务", "table": "earnings_surprises", "expected_max_hours": 24*30,
+         "trigger_task": None,
+         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(created_at)::text AS latest FROM earnings_surprises",
+         "hint": "财报预期差(一致预期 vs 实际,from quarterly+forecasts)"},
+        {"group": "财务", "table": "profit_forecasts", "expected_max_hours": 24*7,
+         "trigger_task": "update_profit_forecasts",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(updated_at)::text AS latest FROM profit_forecasts",
          "hint": "机构一致预期(同花顺,含远期 PE)"},
-        {"group": "财务",   "table": "business_segments",
+        {"group": "财务", "table": "business_segments", "expected_max_hours": 24*90,
+         "trigger_task": "extract_segments_for_all",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(created_at)::text AS latest FROM business_segments",
-         "hint": "年报分部数据(SOTP 用)"},
-        {"group": "财务",   "table": "supply_chains",
+         "hint": "年报分部(SOTP 用,LLM 抽取)"},
+        {"group": "财务", "table": "supply_chains", "expected_max_hours": 24*90,
+         "trigger_task": None,
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(updated_at)::text AS latest FROM supply_chains",
-         "hint": "上游 / 下游 / 竞品"},
+         "hint": "上游/下游/竞品(LLM 抽取,单股触发)"},
 
         # ── 资金 ────────────────────────────
-        {"group": "资金",   "table": "stock_capital_flows",
+        {"group": "资金", "table": "stock_capital_flows", "expected_max_hours": 24,
+         "trigger_task": "update_capital_flows",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(trade_date)::text AS latest FROM stock_capital_flows",
          "hint": "北上资金日度"},
-        {"group": "资金",   "table": "stock_lhb",
+        {"group": "资金", "table": "stock_lhb", "expected_max_hours": 48,
+         "trigger_task": "update_lhb",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(trade_date)::text AS latest FROM stock_lhb",
          "hint": "龙虎榜"},
-        {"group": "资金",   "table": "insider_trades",
+        {"group": "资金", "table": "insider_trades", "expected_max_hours": 24*30,
+         "trigger_task": None,
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(ann_date)::text AS latest FROM insider_trades",
-         "hint": "减持 / 增持(LLM 提取)"},
+         "hint": "减持/增持(LLM 提取)"},
 
         # ── 事件 / 日历 ──────────────────────
-        {"group": "事件",   "table": "stock_events",
+        {"group": "事件", "table": "stock_events", "expected_max_hours": 24,
+         "trigger_task": "run_event_detection",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(triggered_at)::text AS latest FROM stock_events",
          "hint": "事件流水(8 类)"},
-        {"group": "事件",   "table": "calendar_events",
+        {"group": "事件", "table": "calendar_events", "expected_max_hours": 24*7,
+         "trigger_task": "sync_calendar_events",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(event_date)::text AS latest FROM calendar_events",
-         "hint": "财报日 / 解禁日"},
+         "hint": "财报日/解禁日(未来 90 天)"},
 
         # ── 资讯 ────────────────────────────
-        {"group": "资讯",   "table": "industry_news",
+        {"group": "资讯", "table": "industry_news", "expected_max_hours": 6,
+         "trigger_task": "crawl_all_sources",
          "sql": "SELECT count(*) AS rows, NULL::int AS stocks, max(published_at)::text AS latest FROM industry_news",
          "hint": "资讯主表"},
-        {"group": "资讯",   "table": "news_stock_relations",
-         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, NULL::text AS latest FROM news_stock_relations",
-         "hint": "资讯-股票关联"},
+        {"group": "资讯", "table": "research_report_meta", "expected_max_hours": 24,
+         "trigger_task": "crawl_research_reports",
+         "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(created_at)::text AS latest FROM research_report_meta",
+         "hint": "研报元数据(broker/rating/EPS/PE)"},
 
         # ── AI 分析 ──────────────────────────
-        {"group": "AI",     "table": "daily_summaries",
+        {"group": "AI", "table": "daily_summaries", "expected_max_hours": 24,
+         "trigger_task": "generate_daily_summaries",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(summary_date)::text AS latest FROM daily_summaries",
          "hint": "L1 Haiku 每日摘要"},
-        {"group": "AI",     "table": "analysis_reports",
+        {"group": "AI", "table": "analysis_reports", "expected_max_hours": 24,
+         "trigger_task": "generate_reports_for_events",
          "sql": "SELECT count(*) AS rows, count(DISTINCT stock_id) AS stocks, max(report_date)::text AS latest FROM analysis_reports",
          "hint": "L2 Sonnet 深度报告"},
 
         # ── 行业景气 ─────────────────────────
-        {"group": "行业景气", "table": "industry_metrics",
+        {"group": "行业景气", "table": "industry_metrics", "expected_max_hours": 24*30,
+         "trigger_task": "update_industry_metrics",
          "sql": "SELECT count(*) AS rows, NULL::int AS stocks, max(created_at)::text AS latest FROM industry_metrics",
-         "hint": "NVDA 数据中心 / 4 大 CSP capex"},
+         "hint": "NVDA 数据中心/4 大 CSP capex"},
     ]
 
     from datetime import datetime, timezone
@@ -288,6 +333,28 @@ async def data_status(db: AsyncSession = Depends(get_db)):
             except Exception:
                 pass
 
+        # 健康度分级:
+        #   not_implemented = 表设计存在但抓取代码未实现(0 行属正常,不算问题)
+        #   empty           = 应该有数据但 0 行(❌)
+        #   stale           = 有数据但超过 expected_max_hours(⚠)
+        #   healthy         = 有数据且新鲜(✅)
+        expected_max_hours = q.get("expected_max_hours")
+        not_implemented = q.get("not_implemented", False)
+        if not_implemented and rows == 0:
+            status = "not_implemented"
+        elif rows == 0:
+            status = "empty"
+        elif q.get("unhealthy_when_stocks_gt_zero") and stocks is not None and stocks > 0:
+            status = "stale"
+        elif (
+            expected_max_hours is not None
+            and stale_hours is not None
+            and stale_hours > expected_max_hours
+        ):
+            status = "stale"
+        else:
+            status = "healthy"
+
         out.append({
             "group": q["group"],
             "table": q["table"],
@@ -295,6 +362,9 @@ async def data_status(db: AsyncSession = Depends(get_db)):
             "stocks": stocks,
             "latest": latest,
             "stale_hours": stale_hours,
+            "expected_max_hours": expected_max_hours,
+            "status": status,
+            "trigger_task": q.get("trigger_task"),
             "hint": q["hint"],
         })
     return out

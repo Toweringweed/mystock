@@ -29,6 +29,7 @@ export function WatchlistWithTagFilter() {
   const [selected, setSelected] = useState<number[]>([]);
   const [editing, setEditing] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [coreOnly, setCoreOnly] = useState(false);
 
   const handleDelete = async (tag: TagRead) => {
     if (!confirm(`确认删除标签 #${tag.name} ?\n该标签会从所有自选股上解绑,操作不可恢复。`)) {
@@ -68,9 +69,10 @@ export function WatchlistWithTagFilter() {
 
   return (
     <div className="space-y-4">
-      {allTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
-          <span className="text-gray-500 shrink-0">标签筛选：</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+        {allTags.length > 0 && (
+          <>
+        <span className="text-gray-500 shrink-0">标签筛选：</span>
           {CATEGORIES.map((cat) =>
             grouped[cat].length === 0 ? null : (
               <div
@@ -121,28 +123,43 @@ export function WatchlistWithTagFilter() {
               </div>
             ),
           )}
-          <div className="ml-auto flex items-center gap-3">
-            <button
-              onClick={() => setEditing((v) => !v)}
-              className={clsx(
-                "transition-colors",
-                editing ? "text-[#ef5350]" : "text-gray-500 hover:text-gray-700",
-              )}
-            >
-              {editing ? "完成" : "管理标签"}
-            </button>
-            {selected.length > 0 && (
-              <button
-                onClick={() => setSelected([])}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                清除（{selected.length}）
-              </button>
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-3">
+          <button
+            onClick={() => setCoreOnly((v) => !v)}
+            title="只显示标记为核心的自选股"
+            className={clsx(
+              "transition-colors flex items-center gap-1",
+              coreOnly ? "text-yellow-500" : "text-gray-500 hover:text-yellow-400",
             )}
-          </div>
+          >
+            {coreOnly ? "★" : "☆"} 仅核心
+          </button>
+          {allTags.length > 0 && (
+            <>
+              <button
+                onClick={() => setEditing((v) => !v)}
+                className={clsx(
+                  "transition-colors",
+                  editing ? "text-[#ef5350]" : "text-gray-500 hover:text-gray-700",
+                )}
+              >
+                {editing ? "完成" : "管理标签"}
+              </button>
+              {selected.length > 0 && (
+                <button
+                  onClick={() => setSelected([])}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  清除（{selected.length}）
+                </button>
+              )}
+            </>
+          )}
         </div>
-      )}
-      <WatchlistTable filterTagIds={selected} />
+      </div>
+      <WatchlistTable filterTagIds={selected} coreOnly={coreOnly} />
     </div>
   );
 }

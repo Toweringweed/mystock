@@ -40,13 +40,13 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - HTTP_PROXY=http://host.docker.internal:7890
-      - HTTPS_PROXY=http://host.docker.internal:7890
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
       - NO_PROXY=localhost,127.0.0.1,postgres,redis
     env_file:
       - .env
     ports:
-      - "8010:8000"
+      - "8500:8000"
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
@@ -70,8 +70,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - CELERY_WORKER_RUNNING=true
-      - HTTP_PROXY=http://host.docker.internal:7890
-      - HTTPS_PROXY=http://host.docker.internal:7890
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
       - NO_PROXY=localhost,127.0.0.1,postgres,redis
     env_file:
       - .env
@@ -87,6 +87,34 @@ services:
     command: uv run celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
     restart: unless-stopped
 
+  celery-data-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mystock-celery-data-worker
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-mystock}:${POSTGRES_PASSWORD:-mystock123}@postgres:5432/${POSTGRES_DB:-mystock_db}
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_WORKER_RUNNING=true
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,postgres,redis
+    env_file:
+      - .env
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/.venv
+      - annual_reports:/app/data/annual_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uv run celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q data -n data@%h
+    restart: unless-stopped
+
   celery-beat:
     build:
       context: ./backend
@@ -98,8 +126,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       - CELERY_WORKER_RUNNING=true
-      - HTTP_PROXY=http://host.docker.internal:7890
-      - HTTPS_PROXY=http://host.docker.internal:7890
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
       - NO_PROXY=localhost,127.0.0.1,postgres,redis
     env_file:
       - .env
@@ -111,13 +139,33 @@ services:
     command: uv run celery -A app.tasks.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
     restart: unless-stopped
 
+  x-crawler:
+    build:
+      context: ./x-crawler
+      dockerfile: Dockerfile
+    container_name: mystock-x-crawler
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - X_AUTH_TOKEN=${X_AUTH_TOKEN}
+      - X_CT0_TOKEN=${X_CT0_TOKEN}
+      - X_KOL_HANDLES=${X_KOL_HANDLES}
+      - X_CRAWL_INTERVAL_MINUTES=${X_CRAWL_INTERVAL_MINUTES:-30}
+      - HTTP_PROXY=http://host.docker.internal:7897
+      - HTTPS_PROXY=http://host.docker.internal:7897
+      - NO_PROXY=localhost,127.0.0.1,redis,postgres
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
-    image: node:20-alpine
+    image: node:22-alpine
     container_name: mystock-frontend
     working_dir: /app
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8010
+      - SERVER_API_URL=http://host.docker.internal:8500
       - NEXT_TELEMETRY_DISABLED=1
+      - CI=true
     ports:
       - "3010:3000"
     volumes:
@@ -125,7 +173,7 @@ services:
       - /app/node_modules
     depends_on:
       - backend
-    command: sh -c "corepack enable && pnpm install && pnpm dev"
+    command: sh -c "corepack enable && corepack prepare pnpm@10.33.4 --activate && pnpm install && pnpm dev"
     restart: unless-stopped
 
 volumes:

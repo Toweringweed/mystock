@@ -16,6 +16,7 @@ class InstitutionBreakdownItem(BaseModel):
     eps_y1: float | None = None
     pe_y1: float | None = None
     freshness_days: int
+    source_url: str | None = None     # 研报原文 PDF / 新闻链接(展示在 breakdown 表"原文"列)
 
 
 class TargetPriceRealtimeRead(BaseModel):

@@ -19,7 +19,8 @@ const SECTIONS: { title: string; emoji: string; actions: ActionDef[] }[] = [
     title: "数据采集",
     actions: [
       { kind: "trigger", task: "sync_stock_universe",     label: "同步股票池",     hint: "全量 A股+港股代码同步（默认每周日）" },
-      { kind: "trigger", task: "update_realtime_quotes",  label: "拉取行情快照",   hint: "实时行情写入 Redis（仅交易时段有效）" },
+      { kind: "trigger", task: "refresh_watchlist_data",  label: "更新自选股数据", hint: "日 K 入库 + 技术指标 + 基本面 + 盈利预测 + v5 信号" },
+      { kind: "trigger", task: "update_realtime_quotes",  label: "拉取实时快照",   hint: "强制刷新东方财富 spot 最新价，盘前/盘后也可用" },
       { kind: "trigger", task: "update_all_fundamentals", label: "更新基本面",     hint: "PE/PB/PS/ROE 全自选股刷新（限速 0.5s/股）" },
       { kind: "trigger", task: "crawl_all_sources",       label: "抓取资讯",       hint: "wsj/财联社/东财 4 个源" },
       { kind: "trigger", task: "crawl_disclosures_only",  label: "抓取财报公告",   hint: "业绩预告/快报专项" },

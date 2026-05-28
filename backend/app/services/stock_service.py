@@ -1,7 +1,7 @@
 """股票增删改查 + 自选股管理"""
 import logging
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock import Stock
@@ -37,15 +37,20 @@ async def get_all_watchlist_codes_with_info(db: AsyncSession) -> list[dict]:
 
 
 async def add_to_watchlist(db: AsyncSession, payload: StockCreate) -> Stock | None:
-    """添加自选股：若已存在则更新标记，否则新建并触发数据回填"""
+    """添加自选股：若已存在则更新标记，否则新建。"""
     existing = await get_stock_by_code(db, payload.code)
 
     if existing:
         if existing.is_watchlist:
             return existing
         existing.is_watchlist = True
+        existing.data_ready = False
+        existing.sync_status = "pending"
+        existing.sync_error = None
+        existing.sync_task_id = None
+        existing.sync_started_at = None
+        existing.sync_completed_at = None
         await db.flush()
-        _trigger_backfill(existing.code, existing.market)
         return existing
 
     # 尝试从 AKShare 获取基础信息，失败时用 payload.name 兜底
@@ -64,13 +69,12 @@ async def add_to_watchlist(db: AsyncSession, payload: StockCreate) -> Stock | No
         sector=info.get("sector"),
         is_watchlist=True,
         data_ready=False,
+        sync_status="pending",
     )
     db.add(stock)
     await db.flush()
 
-    # 触发异步数据回填（Celery）
-    _trigger_backfill(stock.code, stock.market)
-    logger.info(f"[{payload.code}] 已添加自选股，数据回填任务已提交")
+    logger.info(f"[{payload.code}] 已添加自选股，等待提交后触发数据回填")
     return stock
 
 
@@ -109,14 +113,74 @@ async def remove_from_watchlist(db: AsyncSession, code: str) -> None:
 
 async def mark_data_ready(db: AsyncSession, code: str) -> None:
     await db.execute(
-        update(Stock).where(Stock.code == code).values(data_ready=True)
+        update(Stock).where(Stock.code == code).values(
+            data_ready=True,
+            sync_status="ready",
+            sync_error=None,
+            sync_completed_at=func.now(),
+            updated_at=func.now(),
+        )
     )
 
 
-def _trigger_backfill(code: str, market: str) -> None:
+async def mark_sync_pending(db: AsyncSession, code: str, task_id: str | None = None) -> None:
+    values = {
+        "data_ready": False,
+        "sync_status": "pending",
+        "sync_error": None,
+        "sync_started_at": None,
+        "sync_completed_at": None,
+        "updated_at": func.now(),
+    }
+    if task_id is not None:
+        values["sync_task_id"] = task_id
+    await db.execute(update(Stock).where(Stock.code == code).values(**values))
+
+
+async def mark_sync_running(db: AsyncSession, code: str, task_id: str | None = None) -> None:
+    values = {
+        "data_ready": False,
+        "sync_status": "running",
+        "sync_error": None,
+        "sync_started_at": func.now(),
+        "sync_completed_at": None,
+        "updated_at": func.now(),
+    }
+    if task_id:
+        values["sync_task_id"] = task_id
+    await db.execute(update(Stock).where(Stock.code == code).values(**values))
+
+
+async def mark_sync_failed(db: AsyncSession, code: str, error: str, task_id: str | None = None) -> None:
+    values = {
+        "data_ready": False,
+        "sync_status": "failed",
+        "sync_error": error[:2000],
+        "sync_completed_at": func.now(),
+        "updated_at": func.now(),
+    }
+    if task_id:
+        values["sync_task_id"] = task_id
+    await db.execute(update(Stock).where(Stock.code == code).values(**values))
+
+
+async def set_core_flag(db: AsyncSession, code: str, is_core: bool) -> Stock | None:
+    """标记/取消核心自选股(只对在自选股中的有效)"""
+    stock = await get_stock_by_code(db, code)
+    if not stock or not stock.is_watchlist:
+        return None
+    stock.is_core = is_core
+    await db.flush()
+    await db.refresh(stock)
+    return stock
+
+
+def trigger_backfill(code: str, market: str) -> str:
     """提交 Celery 任务，不阻塞当前请求"""
     try:
         from app.tasks.data_tasks import backfill_stock_data
-        backfill_stock_data.delay(code, market)
+        result = backfill_stock_data.apply_async(args=[code, market], queue="data")
+        return result.id
     except Exception as e:
         logger.error(f"[{code}] 提交回填任务失败: {e}")
+        raise

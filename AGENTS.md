@@ -157,7 +157,7 @@ docker compose exec redis redis-cli
 
 `stock-analysis` skill 在分析完成后调用后端写入 6D 子维度评分(D1/D2/D3/D5/D8/技术):
 
-- **API base URL**:`http://localhost:8010`(默认,docker compose 宿主机端口映射)
+- **API base URL**:`http://localhost:8500`(默认,docker compose 宿主机端口映射;Windows Hyper-V 保留了 7998–8097 端段,主机端口由 8010 调整为 8500)
 - **端点**:`POST /api/v1/analysis/{code}/Codex-score`
 - 远程访问需通过 ngrok / Cloudflare Tunnel 暴露后,在本文件覆盖此 URL
 - 写入后,首页 `WatchlistTable` 综合分自动用 Codex 最新评分;若该股未被 Codex 评过,fallback 到本地 D3 公式

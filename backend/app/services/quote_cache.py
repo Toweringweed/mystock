@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 _redis: aioredis.Redis | None = None
 
-QUOTE_TTL = 60  # 行情缓存 60 秒
+QUOTE_TTL = 60 * 60 * 18  # 保留到次日盘前，避免非交易时段回退到过期 K 线
 QUOTE_KEY_PREFIX = "quote:"
 
 

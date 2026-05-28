@@ -11,6 +11,22 @@ from app.schemas.analysis import (
 router = APIRouter()
 
 
+def _period_label_to_year_quarter(label: str) -> tuple[int, int] | None:
+    """Map report labels to fiscal quarters for YTD-to-single-quarter math."""
+    try:
+        year = int(label[:4])
+    except (TypeError, ValueError):
+        return None
+    if len(label) >= 6 and label[4] == "Q" and label[5].isdigit():
+        q = int(label[5])
+        return (year, q) if 1 <= q <= 4 else None
+    if label.endswith("H1"):
+        return (year, 2)
+    if label.endswith("A"):
+        return (year, 4)
+    return None
+
+
 @router.get("/{code}/report/latest", response_model=ReportRead)
 async def get_latest_report(code: str, db: AsyncSession = Depends(get_db)):
     """获取最新 AI 分析报告"""
@@ -38,6 +54,34 @@ async def refresh_report(code: str, db: AsyncSession = Depends(get_db)):
     from app.tasks.analysis_tasks import generate_report_task
     generate_report_task.delay(code)
     return {"message": "报告生成任务已提交"}
+
+
+@router.get("/{code}/skill-input")
+async def get_skill_input(code: str, db: AsyncSession = Depends(get_db)):
+    """聚合 stock-analysis skill 需要的全部数据(一次拉全)。
+
+    返回 JSON 包含:
+      - basic: 股票基本信息 + 现价 + 30d/60d 涨跌
+      - kline: 近 60 日 OHLCV + 关键技术指标
+      - divergence_signals: 近 30 日背离
+      - fundamentals_ttm / fundamentals_quarterly: 财务(TTM + 近 6 季 同比/环比)
+      - profit_forecasts: 2026/2027 一致预期 forward_pe + 净利预测
+      - target_price: 加权目标价 + 上行空间(v5 框架)
+      - news: 近 7 日资讯/公告(按重要度排序)
+      - research_reports: 近 30 日研报 meta(broker/rating/eps/pe)
+      - events: 近 30 日事件流水
+      - insider_trades: 近 180 日减持/增持
+      - calendar: 未来 90 日财报/解禁
+      - business_segments: 业务分部
+      - industry_metrics: 上游 NVDA/CSP 季报指标(AI 算力相关)
+      - prior_reports: 历史 AI 报告(近 5 份)
+      - peers: 同行业可比标的(2-3 个,从 watchlist)
+    """
+    from app.services.skill_input_service import build_skill_input
+    payload = await build_skill_input(db, code)
+    if not payload:
+        raise HTTPException(status_code=404, detail=f"股票 {code} 不存在或数据未就绪")
+    return payload
 
 
 @router.post("/{code}/claude-score", response_model=ReportRead)
@@ -325,8 +369,6 @@ async def get_quarterly_financials(
     if not stock_id:
         raise HTTPException(status_code=404, detail=f"股票 {code} 不存在")
 
-    # 多取 5 期作 QoQ 计算缓冲(若用户请 4 期,实际拉 9 期)
-    fetch_n = limit + 5
     res = await db.execute(
         select(QuarterlyFinancialsHistory)
         .where(QuarterlyFinancialsHistory.stock_id == stock_id)
@@ -339,19 +381,10 @@ async def get_quarterly_financials(
 
     # 按时间升序计算单季 + QoQ
     # 索引到 quarter:同年 Q1 直接取累计;Q2/Q3/Q4 = 累计 - 上一季累计
-    def parse_period(label: str) -> tuple[int, int] | None:
-        # "2026Q1" -> (2026, 1)
-        try:
-            y = int(label[:4])
-            q = int(label[5])
-            return (y, q)
-        except Exception:
-            return None
-
     # 先建立 (year, q) -> row 索引
     by_yq: dict[tuple[int, int], object] = {}
     for r in all_rows:
-        yq = parse_period(r.period_label)
+        yq = _period_label_to_year_quarter(r.period_label)
         if yq:
             by_yq[yq] = r
 
@@ -360,7 +393,7 @@ async def get_quarterly_financials(
     sq_revenue_history: list[float | None] = []  # 时间顺序的单季营收
     sq_deducted_history: list[float | None] = []
     for r in all_rows:
-        yq = parse_period(r.period_label)
+        yq = _period_label_to_year_quarter(r.period_label)
         sq_rev = None
         sq_ded = None
         if yq:

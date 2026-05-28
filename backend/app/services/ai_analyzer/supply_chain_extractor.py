@@ -2,8 +2,6 @@
 import json
 import logging
 
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 EXTRACT_PROMPT = """你是一位专业的A股行业分析师，熟悉中国上市公司的供应链结构。
@@ -65,67 +63,9 @@ class SupplyChainExtractor:
         if text:
             prompt += f"\n\n以下是公司年报相关内容供参考：\n{text[:3000]}"
 
-        async def _get(key: str) -> str:
-            if db is not None:
-                try:
-                    from app.services.settings_service import get_effective_value
-                    return await get_effective_value(db, key)
-                except Exception:
-                    pass
-            return str(getattr(settings, key, "") or "")
+        from app.services.ai_analyzer.llm_client import call_llm
 
-        # ── OpenRouter ────────────────────────────────────────────────
-        try:
-            or_key = await _get("openrouter_api_key")
-            or_model = await _get("openrouter_model") or settings.openrouter_model
-            if or_key:
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
-                resp = await client.chat.completions.create(
-                    model=or_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_tokens=4000,
-                )
-                return resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"[{code}] OpenRouter 供应链提取失败，尝试下一个: {e}")
-
-        # ── OpenAI ────────────────────────────────────────────────────
-        try:
-            oai_key = await _get("openai_api_key")
-            oai_model = await _get("openai_model") or settings.openai_model
-            if oai_key:
-                from openai import AsyncOpenAI
-                client = AsyncOpenAI(api_key=oai_key)
-                resp = await client.chat.completions.create(
-                    model=oai_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_tokens=4000,
-                )
-                return resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"[{code}] OpenAI 供应链提取失败，尝试下一个: {e}")
-
-        # ── Anthropic ─────────────────────────────────────────────────
-        try:
-            ant_key = await _get("anthropic_api_key")
-            ant_model = await _get("anthropic_model") or settings.anthropic_model
-            if ant_key:
-                import anthropic
-                client = anthropic.AsyncAnthropic(api_key=ant_key)
-                resp = await client.messages.create(
-                    model=ant_model,
-                    max_tokens=4000,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                return resp.content[0].text
-        except Exception as e:
-            logger.error(f"[{code}] Anthropic 供应链提取失败: {e}")
-
-        logger.error(f"[{code}] 所有 LLM provider 均失败，供应链提取无法完成")
-        return ""
+        return await call_llm(db, prompt, temperature=0, max_tokens=4000)
 
     def _parse(self, raw: str) -> list[dict]:
         if not raw:

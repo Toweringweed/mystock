@@ -67,14 +67,17 @@ def hamming_distance(a: int, b: int) -> int:
 async def find_duplicate(
     db: AsyncSession, simhash: int, exclude_id: int | None = None
 ) -> int | None:
-    """在近 24h 内查找近似重复的资讯，返回重复项的 news_id 或 None"""
+    """在近 24h 内(以 crawled_at 为准)查找近似重复的资讯,返回重复项的 news_id 或 None。
+
+    注:cutoff 用 crawled_at 而非 published_at,避免老新闻被新爬入时漏掉与最近相似新闻的比对。
+    """
     if simhash is None:
         return None
     cutoff = datetime.now() - timedelta(hours=DEDUP_WINDOW_HOURS)
 
     stmt = select(IndustryNews.id, IndustryNews.simhash).where(
         IndustryNews.simhash.is_not(None),
-        IndustryNews.published_at >= cutoff,
+        IndustryNews.crawled_at >= cutoff,
     )
     if exclude_id is not None:
         stmt = stmt.where(IndustryNews.id != exclude_id)

@@ -27,9 +27,20 @@ class StockRead(BaseModel):
     industry: str | None = None
     sector: str | None = None
     is_watchlist: bool
+    is_core: bool = False
     data_ready: bool
+    sync_status: str = "idle"
+    sync_task_id: str | None = None
+    sync_error: str | None = None
+    sync_started_at: datetime | None = None
+    sync_completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class StockCoreUpdate(BaseModel):
+    """标记 / 取消核心标识"""
+    is_core: bool
 
 
 class QuoteRead(BaseModel):

@@ -52,6 +52,112 @@ async def save_fundamental(db: AsyncSession, code: str, data: dict) -> None:
     await db.flush()
 
 
+async def save_quarterly_fundamentals(
+    db: AsyncSession, code: str, periods: list[dict]
+) -> int:
+    """写多个季度报告期数据,双写:
+       - stock_fundamentals (period_type=quarterly) — 用于一致预期/财报追踪 join
+       - quarterly_financials_history — 用于"护城河变动追踪"季度走势
+
+       返回写入的报告期数。periods 是 fetch_quarterly_fundamentals 返回的列表。
+    """
+    if not periods:
+        return 0
+    stock_id, _ = await _get_stock_id(db, code)
+    if not stock_id:
+        return 0
+
+    from app.models.backtest_infra import QuarterlyFinancialsHistory
+
+    def _yi_to_yuan(value):
+        return float(value) * 1e8 if value is not None else None
+
+    def _numeric_8_4(value):
+        if value is None:
+            return None
+        value = float(value)
+        return value if abs(value) < 10000 else None
+
+    written = 0
+    for p in periods:
+        period_label = p["period_label"]
+        period_end = p["period_end"]
+
+        # 1) stock_fundamentals (quarterly) — 注:此表无 quick_ratio,只在 quarterly_financials_history 写
+        stmt = insert(StockFundamental).values(
+            stock_id=stock_id,
+            period=period_label,
+            period_type="quarterly",
+            revenue=_yi_to_yuan(p.get("revenue_yi")),
+            net_profit=_yi_to_yuan(p.get("net_profit_yi")),
+            eps=p.get("eps"),
+            roe=p.get("roe"),
+            gross_margin=p.get("gross_margin"),
+            net_margin=p.get("net_margin"),
+            debt_ratio=p.get("debt_ratio"),
+            cash_flow_ratio=_numeric_8_4(p.get("cash_flow_to_profit")),
+            revenue_yoy=_numeric_8_4(p.get("revenue_yoy")),
+            profit_yoy=_numeric_8_4(p.get("profit_yoy")),
+            current_ratio=_numeric_8_4(p.get("current_ratio")),
+        )
+        update_cols = {
+            k: stmt.excluded[k]
+            for k in [
+                "revenue", "net_profit", "eps", "roe", "gross_margin", "net_margin",
+                "debt_ratio", "cash_flow_ratio", "revenue_yoy", "profit_yoy",
+                "current_ratio",
+            ]
+        }
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["stock_id", "period", "period_type"],
+            set_=update_cols,
+        )
+        await db.execute(stmt)
+
+        # 2) quarterly_financials_history
+        qstmt = insert(QuarterlyFinancialsHistory).values(
+            stock_id=stock_id,
+            period_end=period_end,
+            period_label=period_label,
+            revenue_yi=p.get("revenue_yi"),
+            net_profit_yi=p.get("net_profit_yi"),
+            net_profit_deducted_yi=p.get("net_profit_deducted_yi"),
+            eps=p.get("eps"),
+            roe=p.get("roe"),
+            roe_weighted=p.get("roe_weighted"),
+            gross_margin=p.get("gross_margin"),
+            net_margin=p.get("net_margin"),
+            debt_ratio=p.get("debt_ratio"),
+            cash_flow_to_profit=p.get("cash_flow_to_profit"),
+            revenue_yoy=p.get("revenue_yoy"),
+            profit_yoy=p.get("profit_yoy"),
+            profit_qoq=p.get("profit_qoq"),
+            roic=p.get("roic"),
+            fcf_yi=p.get("fcf_yi"),
+            current_ratio=p.get("current_ratio"),
+            quick_ratio=p.get("quick_ratio"),
+            source="akshare_indicator",
+        )
+        qupdate = {
+            k: qstmt.excluded[k]
+            for k in [
+                "revenue_yi", "net_profit_yi", "net_profit_deducted_yi", "eps",
+                "roe", "roe_weighted", "gross_margin", "net_margin", "debt_ratio",
+                "cash_flow_to_profit", "revenue_yoy", "profit_yoy", "profit_qoq",
+                "roic", "fcf_yi", "current_ratio", "quick_ratio",
+            ]
+        }
+        qstmt = qstmt.on_conflict_do_update(
+            index_elements=["stock_id", "period_end"],
+            set_=qupdate,
+        )
+        await db.execute(qstmt)
+        written += 1
+
+    await db.flush()
+    return written
+
+
 async def get_fundamental(db: AsyncSession, code: str) -> FundamentalRead:
     stock_id, name = await _get_stock_id(db, code)
     if not stock_id:

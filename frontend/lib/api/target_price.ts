@@ -9,8 +9,11 @@ export interface InstitutionBreakdownItem {
   target_price: number;
   target_derived: boolean;
   eps_y1: number | null;
+  eps_y2?: number | null;
   pe_y1: number | null;
+  pe_y2?: number | null;
   freshness_days: number;
+  source_url?: string | null;
 }
 
 export interface TargetPriceRealtime {
@@ -40,6 +43,10 @@ export interface TargetPriceRealtime {
     items: InstitutionBreakdownItem[];
     weighted_avg: number;
     simple_avg: number;
+    weighted_forward_pe_y1?: number | null;   // 研报 EPS 反算的 26 加权 PE
+    weighted_forward_pe_y2?: number | null;   // 研报 EPS 反算的 27 加权 PE
+    weight_window_days?: number;              // 实际加权窗口:30 或 60(自适应)
+    reports_in_weight_window?: number;        // 实际进入加权的研报数
   } | null;
   updated_at: string;
 }

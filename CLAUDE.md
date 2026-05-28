@@ -157,11 +157,56 @@ docker compose exec redis redis-cli
 
 `stock-analysis` skill 在分析完成后调用后端写入 6D 子维度评分(D1/D2/D3/D5/D8/技术):
 
-- **API base URL**:`http://localhost:8010`(默认,docker compose 宿主机端口映射)
+- **API base URL**:`http://localhost:8500`(默认,docker compose 宿主机端口映射;Windows Hyper-V 保留了 7998–8097 端段,主机端口由 8010 调整为 8500)
 - **端点**:`POST /api/v1/analysis/{code}/claude-score`
 - 远程访问需通过 ngrok / Cloudflare Tunnel 暴露后,在本文件覆盖此 URL
 - 写入后,首页 `WatchlistTable` 综合分自动用 Claude 最新评分;若该股未被 Claude 评过,fallback 到本地 D3 公式
 - 注:虽然详情页 D5 维度卡已删除(并入 D3),但 `claude_performance_score` 仍由 skill 输出并存储,用作 D3 护城河可持续性的 evidence 信号(WatchlistTable ⑤ 列、ReportPanel)
+
+### 📅 每日批量深度分析(半自动触发流程)
+
+**用户每日打开 Claude Code 触发,无需 cron / cloud routine / 公网暴露。**
+
+#### 触发短语
+
+用户说出以下任一短语即触发(Claude 应识别):
+- "对所有自选股跑深度分析"
+- "批量刷新 watchlist 分析"
+- "Run daily watchlist analysis"
+- "/refresh-watchlist"(若已建 alias)
+
+#### Claude 必须执行的流程(无需用户重复说明)
+
+1. **拉取 watchlist**:
+   ```bash
+   curl -sf http://localhost:8500/api/v1/stocks/watchlist | jq -r '.[].code'
+   ```
+   或直接查 DB:`SELECT code, name FROM stocks WHERE is_watchlist = true`
+
+2. **分批 fan-out**:每批 5-8 只股票,**用 Agent sub-agent 并行**(每个 sub-agent 独立 context),
+   每个 sub-agent prompt 内嵌"严格按 `.claude/skills/stock-analysis/SKILL.md` 的 Step 1-7 跑"。
+   主 session 不亲自分析单股,**只编排 + 汇总**(避免主 context 爆炸)。
+
+3. **每只股票 sub-agent 必跑**:
+   - Step 1: `curl /api/v1/analysis/{code}/skill-input` 拉聚合数据
+   - Step 2: WebSearch ≥2 次(目标价 / 业绩 / 行业拐点 / 颠覆)
+   - Step 3: 横向比较 ≥2 个可比标的(同行业 watchlist)
+   - Step 4-6: 加载 6d_framework / valuation / signal_tiers / industry_map,产出 6 维度 + 技术 评分
+   - Step 7: `POST /api/v1/analysis/{code}/claude-score` 写回(必须,HTTP 200 才算完成)
+
+4. **汇总报告**:全部完成后,主 session 汇报:
+   - 看好(≥7.0)/ 中性(5.5–7.0)/ 看淡(<5.5)+ Veto 触发的股票数
+   - 看好 Top 排序表
+   - Veto 触发的逐只原因
+   - 写回成功 / 失败统计
+
+5. **典型耗时**:38 只股票约 30-60 分钟(5 批 × ~5 min,每批 5-8 并行)。
+   每只 sub-agent 约 2-4 分钟、消耗 60-100K tokens(独立 context)。
+
+#### 用户该什么时候触发?
+
+- 推荐:**每个交易日盘后**(15:00 后,A 股已收盘 + 公告/资讯/研报已落库)
+- 也可在重大事件(美联储议息 / 某只股票财报后)按需手动触发单只
 
 ### 应用页面布局
 

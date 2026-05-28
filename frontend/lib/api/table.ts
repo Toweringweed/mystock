@@ -5,6 +5,7 @@ export interface WatchlistTableRow {
   code: string;
   name: string;
   market: "A" | "HK";
+  is_core: boolean;
   // 维度 3 · 护城河
   gross_margin: number | null;
   net_margin: number | null;

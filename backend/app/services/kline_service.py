@@ -1,5 +1,6 @@
 """K 线数据存取服务"""
 import logging
+import math
 from datetime import date, timedelta
 
 from sqlalchemy import select, delete
@@ -18,7 +19,11 @@ async def _get_stock_id(db: AsyncSession, code: str) -> int | None:
 
 
 async def save_klines(db: AsyncSession, code: str, klines: list[dict]) -> int:
-    """批量写入 K 线，ON CONFLICT DO NOTHING（幂等）"""
+    """批量写入 K 线，ON CONFLICT DO UPDATE（幂等刷新）。
+
+    手动/定时刷新时，同一交易日的数据可能从盘中快照变成收盘定稿。
+    冲突时更新数值字段，避免旧值永久留在库里。
+    """
     if not klines:
         return 0
 
@@ -27,24 +32,49 @@ async def save_klines(db: AsyncSession, code: str, klines: list[dict]) -> int:
         logger.error(f"[{code}] 股票不存在，无法写入K线")
         return 0
 
+    def _clean_number(value):
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return value
+
+    def _clean_date(value):
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        return value
+
     rows = [
         {
             "stock_id": stock_id,
-            "trade_date": k["trade_date"],
-            "open": k.get("open"),
-            "high": k.get("high"),
-            "low": k.get("low"),
-            "close": k.get("close"),
-            "volume": k.get("volume"),
-            "amount": k.get("amount"),
-            "turnover": k.get("turnover"),
-            "change_pct": k.get("change_pct"),
+            "trade_date": _clean_date(k["trade_date"]),
+            "open": _clean_number(k.get("open")),
+            "high": _clean_number(k.get("high")),
+            "low": _clean_number(k.get("low")),
+            "close": _clean_number(k.get("close")),
+            "volume": _clean_number(k.get("volume")),
+            "amount": _clean_number(k.get("amount")),
+            "turnover": _clean_number(k.get("turnover")),
+            "change_pct": _clean_number(k.get("change_pct")),
         }
         for k in klines
     ]
 
     stmt = insert(StockDailyKline).values(rows)
-    stmt = stmt.on_conflict_do_nothing(index_elements=["stock_id", "trade_date"])
+    update_cols = {
+        "open": stmt.excluded.open,
+        "high": stmt.excluded.high,
+        "low": stmt.excluded.low,
+        "close": stmt.excluded.close,
+        "volume": stmt.excluded.volume,
+        "amount": stmt.excluded.amount,
+        "turnover": stmt.excluded.turnover,
+        "change_pct": stmt.excluded.change_pct,
+    }
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["stock_id", "trade_date"],
+        set_=update_cols,
+    )
     result = await db.execute(stmt)
     await db.flush()
 

@@ -7,6 +7,7 @@ import { clsx } from "clsx";
 import { settingsApi, SettingItem, LLMTestResult } from "@/lib/api/settings";
 import ManualActionsPanel from "@/components/settings/ManualActionsPanel";
 import DataStatusPanel from "@/components/settings/DataStatusPanel";
+import HeroActionsPanel from "@/components/settings/HeroActionsPanel";
 
 const GROUP_LABELS: Record<string, string> = {
   ai: "AI 模型配置",
@@ -193,11 +194,22 @@ export default function SettingsPage() {
 
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
 
-        {/* 数据状态（顶部，问题最先看这里） */}
+        {/* 主要操作 — 3 个一键按钮 */}
+        <HeroActionsPanel />
+
+        {/* 数据状态 — 16 张表健康度 + 单点重拉 */}
         <DataStatusPanel />
 
-        {/* 手工操作（最常用） */}
-        <ManualActionsPanel />
+        {/* 高级:17 个原始 task,默认折叠 */}
+        <details className="bg-[#f6f8fa] rounded-xl border border-gray-200">
+          <summary className="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-700 hover:text-gray-900 select-none">
+            🔧 高级 — 单个原始任务触发
+            <span className="ml-2 text-xs text-gray-400 font-normal">(默认不需要,数据健康面板上的"重拉"按钮已覆盖大多数场景)</span>
+          </summary>
+          <div className="px-5 pb-5">
+            <ManualActionsPanel />
+          </div>
+        </details>
 
         {/* LLM 连通性测试 */}
         <LLMTestPanel />

@@ -14,7 +14,10 @@ logger = logging.getLogger(__name__)
 # 可配置项元数据
 SETTING_DEFS: list[dict] = [
     # ── AI 模型 ────────────────────────────────────────────────────────
-    {"key": "openrouter_api_key",  "description": "OpenRouter API Key（优先级最高）", "is_secret": True,  "group": "ai"},
+    {"key": "deepseek_api_key",    "description": "DeepSeek API Key（优先级最高）", "is_secret": True,  "group": "ai"},
+    {"key": "deepseek_model",      "description": "DeepSeek 模型名称",              "is_secret": False, "group": "ai"},
+    {"key": "deepseek_base_url",   "description": "DeepSeek API Base URL",          "is_secret": False, "group": "ai"},
+    {"key": "openrouter_api_key",  "description": "OpenRouter API Key",             "is_secret": True,  "group": "ai"},
     {"key": "openrouter_model",    "description": "OpenRouter 模型名称",              "is_secret": False, "group": "ai"},
     {"key": "openai_api_key",      "description": "OpenAI API Key",                   "is_secret": True,  "group": "ai"},
     {"key": "openai_model",        "description": "OpenAI 模型名称",                  "is_secret": False, "group": "ai"},

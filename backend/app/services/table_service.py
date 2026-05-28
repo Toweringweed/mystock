@@ -282,6 +282,7 @@ async def get_watchlist_table(db: AsyncSession) -> list[WatchlistTableRow]:
                 code=stock.code,
                 name=stock.name,
                 market=stock.market,
+                is_core=stock.is_core,
                 gross_margin=gross_margin,
                 net_margin=net_margin,
                 roe=roe,

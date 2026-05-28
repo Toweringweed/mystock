@@ -190,6 +190,7 @@ cython_debug/
 
 # Local assistant/editor state
 .claude/settings.local.json
+.claude/worktrees/
 
 # Environment files
 .env.*

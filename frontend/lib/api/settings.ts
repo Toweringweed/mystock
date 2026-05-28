@@ -17,7 +17,12 @@ export interface LLMTestResult {
 }
 
 export type TriggerableTask =
+  | "refresh_all_watchlist"
+  | "daily_after_close_routine"
+  | "monthly_universe_refresh"
   | "sync_stock_universe"
+  | "refresh_watchlist_data"
+  | "crawl_research_reports"
   | "update_realtime_quotes"
   | "update_all_fundamentals"
   | "crawl_all_sources"
@@ -49,6 +54,10 @@ export interface DataStatusItem {
   stocks: number | null;
   latest: string | null;
   stale_hours: number | null;
+  expected_max_hours?: number | null;
+  /** healthy / stale / empty / not_implemented */
+  status?: "healthy" | "stale" | "empty" | "not_implemented";
+  trigger_task?: string | null;
   hint: string;
 }
 

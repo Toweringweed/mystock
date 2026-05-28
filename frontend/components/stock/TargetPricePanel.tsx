@@ -93,7 +93,13 @@ export function TargetPricePanel({ code }: { code: string }) {
           <div>
             <p className="text-xs text-gray-500 mb-0.5">加权目标价</p>
             <p className="text-xl font-bold text-gray-800 tabular-nums">¥{fmt(tpWeighted)}</p>
-            <p className="text-[10px] text-gray-400">机构权重加权 · {data.research_count_30d}/30d</p>
+            <p className="text-[10px] text-gray-400">
+              {data.institution_breakdown?.reports_in_weight_window ?? data.research_count_30d}{" "}
+              家加权 · {data.institution_breakdown?.weight_window_days ?? 30}d
+              <span className="ml-1">
+                (近 30d {data.research_count_30d} / 90d {data.research_count_90d} 家)
+              </span>
+            </p>
           </div>
         </div>
 
@@ -161,7 +167,10 @@ export function TargetPricePanel({ code }: { code: string }) {
                 <th className="px-2 py-1.5 text-right">目标价</th>
                 <th className="px-2 py-1.5 text-right">EPS 26</th>
                 <th className="px-2 py-1.5 text-right">PE 26</th>
+                <th className="px-2 py-1.5 text-right">EPS 27</th>
+                <th className="px-2 py-1.5 text-right">PE 27</th>
                 <th className="px-2 py-1.5 text-center">时效</th>
+                <th className="px-2 py-1.5 text-center">原文</th>
               </tr>
             </thead>
             <tbody>
@@ -210,10 +219,31 @@ export function TargetPricePanel({ code }: { code: string }) {
                       {it.eps_y1?.toFixed(2) ?? "—"}
                     </td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
-                      {it.pe_y1?.toFixed(1) ?? "—"}
+                      {it.pe_y1 != null && it.pe_y1 > 1.5 ? it.pe_y1.toFixed(1) : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                      {it.eps_y2?.toFixed(2) ?? "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-gray-600">
+                      {it.pe_y2?.toFixed(1) ?? "—"}
                     </td>
                     <td className="px-2 py-1.5 text-center text-[10px]">
                       {freshIcon} {it.freshness_days}d
+                    </td>
+                    <td className="px-2 py-1.5 text-center">
+                      {it.source_url ? (
+                        <a
+                          href={it.source_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="查看研报原文"
+                          className="text-[#58a6ff] hover:text-[#79b8ff] transition-colors"
+                        >
+                          🔗
+                        </a>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -224,8 +254,9 @@ export function TargetPricePanel({ code }: { code: string }) {
       </div>
 
       <p className="text-[10px] text-gray-300 leading-relaxed">
-        💡 v5 框架核心信号 · 加权目标价 = Σ(目标价 × 机构权重) / Σ(权重) · 摩根士丹利 1.5 / 中金 1.4 / 高盛 1.1 ·
-        加成:有一致预期 +20%,3 家上修 +40% · 时效衰减:&gt;30 天信号 × 0.3
+        💡 v5 框架核心信号 · 加权目标价 = Σ(目标价 × 机构权重) / Σ(权重) ·
+        <strong className="text-gray-500"> 自适应窗口:30 天内 ≥2 篇用 30d,否则用 60d</strong>(同机构同日 dedup);
+        摩根士丹利/JPM/Citi 1.20 · 高盛 0.80 · 中金 1.00;加成:一致预期 +20%,3 家上修 +40%。
       </p>
     </div>
   );

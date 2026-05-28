@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -18,7 +18,15 @@ class Stock(Base):
     industry: Mapped[str | None] = mapped_column(String(50))
     sector: Mapped[str | None] = mapped_column(String(50))
     is_watchlist: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_core: Mapped[bool] = mapped_column(Boolean, default=False, index=True, server_default="false")
     data_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    sync_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="idle", server_default="idle", index=True
+    )
+    sync_task_id: Mapped[str | None] = mapped_column(String(64))
+    sync_error: Mapped[str | None] = mapped_column(Text)
+    sync_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sync_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

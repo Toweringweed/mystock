@@ -10,7 +10,8 @@ import { stocksApi } from "@/lib/api/stocks";
 import { NewsFeed } from "@/components/news/NewsFeed";
 import { tableApi } from "@/lib/api/table";
 import { TagBar } from "@/components/stock/TagBar";
-import { ResearchPanel } from "@/components/stock/ResearchPanel";
+import { NewsHighlightsPanel } from "@/components/stock/NewsHighlightsPanel";
+import { targetPriceApi } from "@/lib/api/target_price";
 import { EarningsTrackPanel } from "@/components/stock/EarningsTrackPanel";
 import { EstimateRevisionsPanel } from "@/components/stock/EstimateRevisionsPanel";
 import { MoatChangePanel } from "@/components/stock/MoatChangePanel";
@@ -203,7 +204,43 @@ interface FundLike {
   debt_ratio?: number | null;
 }
 
-function buildDim3Moat(fund: FundLike | null | undefined): DimScore {
+// 纯财务公式计算护城河分（不依赖 Claude，用于「首页公式分」对比行）
+function dim3FormulaScore(fund: FundLike | null | undefined): number | null {
+  if (!fund || (fund.gross_margin == null && fund.roe == null)) return null;
+  const gm = fund.gross_margin ?? 0;
+  const roe = fund.roe ?? 0;
+  const nm = fund.net_margin ?? 0;
+  let s = 5;
+  if (gm > 40) s += 2;
+  else if (gm > 25) s += 1;
+  else if (gm > 0 && gm < 15) s -= 1;
+  if (roe > 20) s += 2;
+  else if (roe > 12) s += 1;
+  else if (roe > 0 && roe < 5) s -= 1;
+  if (nm > 15) s += 1;
+  if (fund.debt_ratio != null && fund.debt_ratio > 70) s -= 1;
+  return clamp10(s);
+}
+
+function buildDim3Moat(
+  fund: FundLike | null | undefined,
+  report: { full_report?: Record<string, unknown> | null } | null | undefined,
+): DimScore {
+  const claude = claudeScoreFromReport(report, "claude_moat_score");
+  const { text: longText, conclusion } = dimRichText(report, "d3");
+
+  // 优先使用 Claude 评分（与 dim1/dim2/dim8/tech 保持一致）
+  if (claude != null) {
+    let j = conclusion ?? "护城河中等";
+    if (!conclusion) {
+      if (claude >= 8) j = "护城河稳固，毛利率 + ROE 双优";
+      else if (claude >= 6) j = "护城河良好，盈利质量稳健";
+      else if (claude <= 3) j = "护城河承压，需关注盈利质量恶化";
+    }
+    return { score: claude, judgment: j, color: colorByScore(claude), evidence: longText ? [] : ["来源: Claude 6D 评分"], longText: longText ?? undefined };
+  }
+
+  // Fallback：财务指标公式
   if (!fund || (fund.gross_margin == null && fund.roe == null)) {
     return { score: null, judgment: "财务数据不足，护城河暂无法评估", color: "gray", evidence: [] };
   }
@@ -511,6 +548,8 @@ export function StockDetailView({ code }: { code: string }) {
     analysisApi.divergence(code, 60).catch(() => []));
   const { data: indicators } = useSWR(`indicators-${code}-30`, () => klineApi.indicators(code, 30));
   const { data: klines } = useSWR(`kline-${code}-30`, () => klineApi.daily(code, 30));
+  const { data: targetPrice } = useSWR(`target-price-realtime-${code}`, () =>
+    targetPriceApi.forStock(code).catch(() => null));
 
   const [refreshing, setRefreshing] = useState(false);
   const [llmLoading, setLlmLoading] = useState(false);
@@ -570,8 +609,16 @@ export function StockDetailView({ code }: { code: string }) {
   const np26 = f26?.net_profit_forecast != null ? f26.net_profit_forecast / 1e8 : null;
   const np27 = f27?.net_profit_forecast != null ? f27.net_profit_forecast / 1e8 : null;
   const mktCap = fund?.market_cap ?? null;
-  const fwdPE26 = mktCap && np26 && np26 > 0 ? Math.round(mktCap / np26) : f26?.forward_pe ?? null;
-  const fwdPE27 = mktCap && np27 && np27 > 0 ? Math.round(mktCap / np27) : f27?.forward_pe ?? null;
+  // 远期 PE 双轨:研报反算 + 同花顺一致预期(profit_forecasts.forward_pe)— 都展示让用户对比
+  const researchPE26 = targetPrice?.institution_breakdown?.weighted_forward_pe_y1 ?? null;
+  const researchPE27 = targetPrice?.institution_breakdown?.weighted_forward_pe_y2 ?? null;
+  const thsPE26 = f26?.forward_pe ?? (mktCap && np26 && np26 > 0 ? mktCap / np26 : null);
+  const thsPE27 = f27?.forward_pe ?? (mktCap && np27 && np27 > 0 ? mktCap / np27 : null);
+  // 兼容旧用法(取一个主值给 peColor 着色) — 研报优先, fallback 共识
+  const fwdPE26 = researchPE26 != null ? Math.round(researchPE26) :
+                  thsPE26 != null ? Math.round(thsPE26) : null;
+  const fwdPE27 = researchPE27 != null ? Math.round(researchPE27) :
+                  thsPE27 != null ? Math.round(thsPE27) : null;
   const peg = fund?.pe_ttm && fund?.profit_yoy && fund.profit_yoy > 0 ? +(fund.pe_ttm / fund.profit_yoy).toFixed(2) : null;
   const latestClose = klines?.length ? klines[klines.length - 1].close : null;
   const high30 = klines?.length ? Math.max(...klines.map((k) => k.high)) : null;
@@ -597,12 +644,12 @@ export function StockDetailView({ code }: { code: string }) {
   const reportLike = report as ReportLike | null | undefined;
   const dim1 = buildDim1Industry(reportLike);            // D1' 行业拐点 + 叙事(合并)
   const dim2 = buildDim2Disruption(reportLike);
-  const dim3 = buildDim3Moat(fund as FundLike | null | undefined);
+  const dim3 = buildDim3Moat(fund as FundLike | null | undefined, reportLike);
   const dim8 = buildDim8Governance(reportLike);
   const dimTech = buildDimTech(reportLike);              // 技术评估
 
-  // 首页公式分(本地 fallback,不依赖 Claude):D3 护城河
-  const formulaScore = dim3.score;
+  // 首页公式分：始终用纯财务指标（用于"公式分 vs Claude 6D"对比行）
+  const formulaScore = dim3FormulaScore(fund as FundLike | null | undefined);
   const hasClaudeScore =
     report?.full_report?.claude_overall_score != null;
 
@@ -636,16 +683,25 @@ export function StockDetailView({ code }: { code: string }) {
   }
   if (overallScore != null) overallScore = +overallScore.toFixed(1);
 
+  // Prefer the exact overall_score Claude wrote during analysis (Step 7 write-back)
+  const claudeOverallScore = hasClaudeScore
+    ? +(report!.full_report!.claude_overall_score as number).toFixed(1)
+    : null;
+  const claudeOverallLabel =
+    (report?.full_report?.claude_overall_label as string | null | undefined) ?? null;
+  if (claudeOverallScore != null) overallScore = claudeOverallScore;
+
   const validDimCount =
     [dim1, dim2, dim3, dim8, dimTech].filter((d) => d.score != null).length;
   // 2026-05 阈值偏移升级:≥7.5 强烈看好 / 6.5-7.4 看好 / 5.5-6.4 中性 / 3.5-5.4 看淡 / <3.5 强烈看淡
-  const overallJudgment =
+  const overallJudgment = claudeOverallLabel ?? (
     overallScore == null ? "—"
       : overallScore >= 7.5 ? "强烈看好"
       : overallScore >= 6.5 ? "看好"
       : overallScore >= 5.5 ? "中性"
       : overallScore >= 3.5 ? "看淡"
-      : "强烈看淡";
+      : "强烈看淡"
+  );
   const overallColorCls =
     overallScore == null ? "text-gray-600"
       : overallScore >= 6.5 ? "text-[#ef5350]"
@@ -729,8 +785,6 @@ export function StockDetailView({ code }: { code: string }) {
               { label: "PB", value: fmt(fund?.pb, "x"), cls: undefined },
               { label: "PEG", value: peg != null ? fmt(peg) : "—", cls: peg != null ? (peg < 1 ? "text-[#26a69a]" : peg > 1.5 ? "text-[#ef5350]" : "text-gray-700") : undefined },
               { label: "PE历史分位", value: fund?.pe_percentile != null ? `${fund.pe_percentile.toFixed(0)}%` : "—", cls: fund?.pe_percentile != null ? (fund.pe_percentile < 30 ? "text-[#26a69a]" : fund.pe_percentile > 70 ? "text-[#ef5350]" : "text-gray-700") : undefined },
-              { label: "26远期PE", value: fwdPE26 != null ? `${fwdPE26}x` : "—", cls: peColor(fwdPE26) },
-              { label: "27远期PE", value: fwdPE27 != null ? `${fwdPE27}x` : "—", cls: peColor(fwdPE27) },
               { label: "ROE", value: fmt(fund?.roe, "%"), cls: fund?.roe != null && fund.roe > 20 ? "text-[#ef5350]" : "text-gray-700" },
               { label: "市值", value: mktCap ? `${mktCap.toFixed(0)}亿` : "—", cls: "text-gray-700" },
             ].map((m) => (
@@ -739,6 +793,38 @@ export function StockDetailView({ code }: { code: string }) {
                 <span className={clsx("font-medium", m.cls)}>{m.value}</span>
               </span>
             ))}
+            {/* 26 远期 PE — 双轨展示:研报反算 / 同花顺共识 */}
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-gray-500">26远期PE</span>
+              {researchPE26 != null ? (
+                <span title="研报 EPS 加权反算" className={clsx("font-medium", peColor(researchPE26))}>
+                  研 {Math.round(researchPE26)}x
+                </span>
+              ) : null}
+              {researchPE26 != null && thsPE26 != null && <span className="text-gray-300 mx-0.5">/</span>}
+              {thsPE26 != null ? (
+                <span title={`同花顺一致预期${f26?.analyst_count ? ` · ${f26.analyst_count} 家分析师` : ""}`} className={clsx("font-medium", peColor(thsPE26))}>
+                  共 {Math.round(thsPE26)}x
+                </span>
+              ) : null}
+              {researchPE26 == null && thsPE26 == null && <span className="text-gray-400">—</span>}
+            </span>
+            {/* 27 远期 PE — 双轨 */}
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-gray-500">27远期PE</span>
+              {researchPE27 != null ? (
+                <span title="研报 EPS 加权反算" className={clsx("font-medium", peColor(researchPE27))}>
+                  研 {Math.round(researchPE27)}x
+                </span>
+              ) : null}
+              {researchPE27 != null && thsPE27 != null && <span className="text-gray-300 mx-0.5">/</span>}
+              {thsPE27 != null ? (
+                <span title={`同花顺一致预期${f27?.analyst_count ? ` · ${f27.analyst_count} 家分析师` : ""}`} className={clsx("font-medium", peColor(thsPE27))}>
+                  共 {Math.round(thsPE27)}x
+                </span>
+              ) : null}
+              {researchPE27 == null && thsPE27 == null && <span className="text-gray-400">—</span>}
+            </span>
           </div>
 
           {/* 价格区间 */}
@@ -1122,8 +1208,11 @@ export function StockDetailView({ code }: { code: string }) {
           </div>
         ) : null}
 
-        {/* 券商研报 */}
-        <ResearchPanel code={code} />
+        {/* 近期催化剂 + 风险(替代原券商研报列表;研报原文链接已并入下方目标价表格"原文"列) */}
+        <div>
+          <SectionTitle>近期催化剂 · 风险</SectionTitle>
+          <NewsHighlightsPanel code={code} />
+        </div>
 
         {/* 近期资讯 */}
         <div>

@@ -118,6 +118,29 @@ async def get_stock_news(
     return await get_news_feed(db, [code], limit, urgency=urgency, min_score=min_score)
 
 
+async def get_news_detail(db: AsyncSession, news_id: int) -> dict | None:
+    """详情页:正文 + 关联股票"""
+    result = await db.execute(select(IndustryNews).where(IndustryNews.id == news_id))
+    news = result.scalar_one_or_none()
+    if not news:
+        return None
+
+    rel_q = await db.execute(
+        select(Stock.code, Stock.name, NewsStockRelation.relevance)
+        .join(NewsStockRelation, NewsStockRelation.stock_id == Stock.id)
+        .where(NewsStockRelation.news_id == news_id)
+        .order_by(NewsStockRelation.relevance.desc())
+    )
+    related = [
+        {"code": r.code, "name": r.name, "relevance": float(r.relevance)}
+        for r in rel_q.all()
+    ]
+
+    payload = {c.name: getattr(news, c.name) for c in news.__table__.columns}
+    payload["related_stocks"] = related
+    return payload
+
+
 async def delete_news(db: AsyncSession, news_id: int) -> bool:
     """删除一条资讯（同时级联删除关联记录）"""
     await db.execute(

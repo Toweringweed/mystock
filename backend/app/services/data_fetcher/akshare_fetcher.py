@@ -8,22 +8,19 @@ from typing import Any
 
 import akshare as ak
 import pandas as pd
+import requests
 import yfinance as yf
 from tenacity import retry, stop_after_attempt, wait_exponential
-
-
-_IN_DOCKER = os.path.exists("/.dockerenv")
 
 
 @contextlib.contextmanager
 def _no_proxy():
     """
-    在宿主机上临时清除代理（Clash 拦截会导致东方财富连接失败，直连反而正常）。
-    在 Docker 内保留代理（通过 host.docker.internal:7890 走宿主机 Clash）。
+    临时清除代理。
+
+    AKShare 的东财/巨潮等国内数据源在当前 Docker 环境里直连可用，
+    但通过宿主机代理会出现 RemoteDisconnected，导致任务静默拿不到数据。
     """
-    if _IN_DOCKER:
-        yield
-        return
     proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
     saved = {k: os.environ.pop(k, None) for k in proxy_keys}
     try:
@@ -186,6 +183,12 @@ class AKShareFetcher:
             return f"{code}.SS"
         return f"{code}.SZ"
 
+    def _a_code_to_em_secucode(self, code: str) -> str:
+        """将 A 股代码转换为东方财富 F10 接口格式（300750 → 300750.SZ）"""
+        if code.startswith(("6", "9")):
+            return f"{code}.SH"
+        return f"{code}.SZ"
+
     def _fetch_a_kline(self, code: str, start: date, end: date) -> list[dict]:
         try:
             with _no_proxy():
@@ -296,8 +299,19 @@ class AKShareFetcher:
             return []
 
     def _fetch_realtime_batch(self, codes: list[str]) -> list[dict]:
-        with _no_proxy():
-            df = ak.stock_zh_a_spot_em()
+        try:
+            with _no_proxy():
+                df = ak.stock_zh_a_spot_em()
+        except Exception as exc:
+            logger.warning(f"AKShare 实时行情失败，改用东方财富直连: {exc}")
+            try:
+                rows = self._fetch_realtime_batch_eastmoney(codes)
+                if rows:
+                    return rows
+            except Exception as em_exc:
+                logger.warning(f"东方财富直连实时行情失败，改用新浪行情: {em_exc}")
+            return self._fetch_realtime_batch_sina(codes)
+
         df = df[df["代码"].isin(codes)]
         result = []
         for _, row in df.iterrows():
@@ -310,6 +324,140 @@ class AKShareFetcher:
                 "amount": float(row.get("成交额", 0) or 0),
                 "turnover": float(row.get("换手率", 0) or 0),
                 "pe_ttm": float(row.get("市盈率-动态", 0) or 0) or None,
+                "updated_at": datetime.now().isoformat(),
+            })
+        return result
+
+    def _fetch_realtime_batch_eastmoney(self, codes: list[str]) -> list[dict]:
+        """东方财富实时行情兜底。
+
+        AKShare 的 spot 包装层在 Docker 内偶发 RemoteDisconnected。这里直接调用
+        同一个 EastMoney endpoint，避免首页实时价因为单个包装层失败而长期为空。
+        """
+        url = "https://82.push2.eastmoney.com/api/qt/clist/get"
+        base_params = {
+            "po": 1,
+            "np": 1,
+            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f12",
+            "fs": "m:0 t:6,m:0 t:80,m:1 t:2,m:1 t:23,m:0 t:81 s:2048",
+            "fields": "f2,f3,f5,f6,f8,f9,f12,f14",
+        }
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Referer": "https://quote.eastmoney.com/",
+        }
+        wanted = set(codes)
+
+        def _num(value, default=0.0):
+            if value in (None, "-", ""):
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        result = []
+        found: set[str] = set()
+        page_size = 200
+        for page in range(1, 40):
+            params = {**base_params, "pn": page, "pz": page_size}
+            with _no_proxy():
+                resp = requests.get(url, params=params, headers=headers, timeout=15)
+                resp.raise_for_status()
+            data = resp.json().get("data") or {}
+            rows = data.get("diff") or []
+            if not rows:
+                break
+            for row in rows:
+                code = str(row.get("f12") or "")
+                if code not in wanted or code in found:
+                    continue
+                found.add(code)
+                result.append({
+                    "code": code,
+                    "name": row.get("f14") or code,
+                    "price": _num(row.get("f2")),
+                    "change_pct": _num(row.get("f3")),
+                    "volume": int(_num(row.get("f5"))),
+                    "amount": _num(row.get("f6")),
+                    "turnover": _num(row.get("f8")),
+                    "pe_ttm": _num(row.get("f9"), None),
+                    "updated_at": datetime.now().isoformat(),
+                })
+            if found >= wanted:
+                break
+        return result
+
+    def _fetch_realtime_batch_sina(self, codes: list[str]) -> list[dict]:
+        """新浪行情兜底，只提供首页实时价需要的核心字段。"""
+        symbols = []
+        code_by_symbol = {}
+        for code in codes:
+            prefix = "sh" if code.startswith(("6", "9")) else "sz"
+            symbol = f"{prefix}{code}"
+            symbols.append(symbol)
+            code_by_symbol[symbol] = code
+        if not symbols:
+            return []
+
+        url = f"https://hq.sinajs.cn/list={','.join(symbols)}"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0 Safari/537.36"
+            ),
+            "Referer": "https://finance.sina.com.cn",
+        }
+        with _no_proxy():
+            resp = requests.get(url, headers=headers, timeout=15)
+            resp.raise_for_status()
+
+        text = resp.content.decode("gb18030", errors="ignore")
+        result = []
+        for line in text.splitlines():
+            if '="' not in line:
+                continue
+            symbol = line.split("hq_str_", 1)[-1].split("=", 1)[0]
+            code = code_by_symbol.get(symbol)
+            if not code:
+                continue
+            payload = line.split('="', 1)[-1].rstrip('";')
+            fields = payload.split(",")
+            if len(fields) < 10 or not fields[0]:
+                continue
+            try:
+                open_price = float(fields[1] or 0)
+                prev_close = float(fields[2] or 0)
+                price = float(fields[3] or 0)
+                high = float(fields[4] or 0)
+                low = float(fields[5] or 0)
+                volume = int(float(fields[8] or 0))
+                amount = float(fields[9] or 0)
+                trade_date = pd.to_datetime(fields[30]).date() if len(fields) > 30 and fields[30] else None
+            except ValueError:
+                continue
+            change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0.0
+            result.append({
+                "code": code,
+                "name": fields[0],
+                "price": price,
+                "change_pct": change_pct,
+                "volume": volume,
+                "amount": amount,
+                "turnover": 0.0,
+                "pe_ttm": None,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "trade_date": trade_date.isoformat() if trade_date else None,
                 "updated_at": datetime.now().isoformat(),
             })
         return result
@@ -359,6 +507,165 @@ class AKShareFetcher:
                 logger.warning(f"[{code}] AKShare 财务指标获取失败: {e}")
 
         return result
+
+    async def fetch_quarterly_fundamentals(
+        self, code: str, start_year: str = "2023", market: str = "A"
+    ) -> list[dict]:
+        """抓取个股**所有报告期**的财务分析指标(季度+年度,含半年报/三季报/年报)。
+
+        返回 list of dict, 每条对应一个报告期。字段:
+          period_end (date): 报告期末日期
+          period_label (str): "2026Q1" / "2025H1" / "2025A" 等
+          revenue_yi / net_profit_yi / net_profit_deducted_yi / roe / gross_margin
+          / net_margin / debt_ratio / revenue_yoy / profit_yoy
+
+        AKShare `stock_financial_analysis_indicator` 默认返回每个报告期一行,典型粒度 = 季度。
+        """
+        if market != "A":
+            logger.info(f"[{code}] 暂跳过非 A 股季度财务抓取: market={market}")
+            return []
+
+        def _period_label(period_end: date) -> str:
+            month, day = period_end.month, period_end.day
+            year = period_end.year
+            if month == 3 and day == 31:
+                return f"{year}Q1"
+            if month == 6 and day == 30:
+                return f"{year}H1"
+            if month == 9 and day == 30:
+                return f"{year}Q3"
+            if month == 12 and day == 31:
+                return f"{year}A"
+            return period_end.isoformat()
+
+        def _row_float(row, *cols: str, scale: float = 1.0) -> float | None:
+            for col in cols:
+                if col not in row:
+                    continue
+                v = row.get(col)
+                try:
+                    if v is not None and not pd.isna(v):
+                        return float(v) / scale
+                except (ValueError, TypeError):
+                    continue
+            return None
+
+        def _parse_period_end(value) -> date | None:
+            try:
+                return pd.to_datetime(value).date()
+            except (ValueError, TypeError):
+                return None
+
+        start_year_int = int(start_year)
+        by_period: dict[date, dict] = {}
+
+        try:
+            with _no_proxy():
+                df = await asyncio.to_thread(
+                    ak.stock_financial_analysis_indicator, symbol=code, start_year=start_year
+                )
+        except Exception as e:
+            logger.warning(f"[{code}] AKShare 新浪财务指标获取失败: {e}")
+            df = None
+
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                # 日期字段名可能是 "日期" 或 "报告期"
+                period_end = _parse_period_end(row.get("日期") or row.get("报告期"))
+                if not period_end or period_end.year < start_year_int:
+                    continue
+
+                by_period[period_end] = {
+                    "period_end": period_end,
+                    "period_label": _period_label(period_end),
+                    "eps": _row_float(row, "摊薄每股收益(元)", "加权每股收益(元)"),
+                    "net_profit_deducted_yi": _row_float(
+                        row, "扣除非经常性损益后的净利润(元)", scale=1e8
+                    ),
+                    "roe": _row_float(row, "净资产收益率(%)"),
+                    "roe_weighted": _row_float(row, "加权净资产收益率(%)"),
+                    "gross_margin": _row_float(row, "销售毛利率(%)"),
+                    "net_margin": _row_float(row, "销售净利率(%)"),
+                    "debt_ratio": _row_float(row, "资产负债率(%)"),
+                    "revenue_yoy": _row_float(row, "主营业务收入增长率(%)"),
+                    "profit_yoy": _row_float(row, "净利润增长率(%)"),
+                    "current_ratio": _row_float(row, "流动比率"),
+                    "quick_ratio": _row_float(row, "速动比率"),
+                    "cash_flow_to_profit": _row_float(row, "经营现金净流量与净利润的比率(%)"),
+                }
+
+        # 东方财富 F10 主指标含营收/归母净利/扣非净利金额；原新浪指标通常没有营收。
+        try:
+            with _no_proxy():
+                em_df = await asyncio.to_thread(
+                    ak.stock_financial_analysis_indicator_em,
+                    symbol=self._a_code_to_em_secucode(code),
+                    indicator="按报告期",
+                )
+        except Exception as e:
+            logger.warning(f"[{code}] AKShare 东方财富财务指标获取失败: {e}")
+            em_df = None
+
+        if em_df is not None and not em_df.empty:
+            for _, row in em_df.iterrows():
+                period_end = _parse_period_end(row.get("REPORT_DATE"))
+                if not period_end or period_end.year < start_year_int:
+                    continue
+                item = by_period.setdefault(period_end, {
+                    "period_end": period_end,
+                    "period_label": _period_label(period_end),
+                })
+                enrich = {
+                    "revenue_yi": _row_float(row, "TOTALOPERATEREVE", scale=1e8),
+                    "net_profit_yi": _row_float(row, "PARENTNETPROFIT", scale=1e8),
+                    "net_profit_deducted_yi": _row_float(
+                        row, "KCFJCXSYJLR", "DEDU_PARENT_PROFIT", scale=1e8
+                    ),
+                    "eps": _row_float(row, "EPSJB", "EPSXS"),
+                    "roe": _row_float(row, "ROEJQ"),
+                    "roe_weighted": _row_float(row, "ROEJQ"),
+                    "gross_margin": _row_float(row, "XSMLL", "GROSS_PROFIT_RATIO"),
+                    "net_margin": _row_float(row, "XSJLL", "NET_PROFIT_RATIO"),
+                    "debt_ratio": _row_float(row, "ZCFZL"),
+                    "revenue_yoy": _row_float(row, "TOTALOPERATEREVETZ"),
+                    "profit_yoy": _row_float(row, "PARENTNETPROFITTZ"),
+                    "profit_qoq": _row_float(row, "NETPROFITRPHBZC", "DJD_DPNP_QOQ"),
+                    "current_ratio": _row_float(row, "LD"),
+                    "quick_ratio": _row_float(row, "SD"),
+                    "cash_flow_to_profit": _row_float(row, "NCO_NETPROFIT"),
+                    "roic": _row_float(row, "ROIC"),
+                    "fcf_yi": _row_float(row, "FCFF_BACK", scale=1e8),
+                }
+                for key, value in enrich.items():
+                    if value is not None:
+                        item[key] = value
+
+        out = list(by_period.values())
+        if not out:
+            return []
+
+        for item in out:
+            item.setdefault("revenue_yi", None)
+            item.setdefault("net_profit_yi", None)
+            item.setdefault("net_profit_deducted_yi", None)
+            item.setdefault("eps", None)
+            item.setdefault("roe", None)
+            item.setdefault("roe_weighted", None)
+            item.setdefault("gross_margin", None)
+            item.setdefault("net_margin", None)
+            item.setdefault("debt_ratio", None)
+            item.setdefault("revenue_yoy", None)
+            item.setdefault("profit_yoy", None)
+            item.setdefault("profit_qoq", None)
+            item.setdefault("current_ratio", None)
+            item.setdefault("quick_ratio", None)
+            item.setdefault("cash_flow_to_profit", None)
+            item.setdefault("roic", None)
+            item.setdefault("fcf_yi", None)
+
+        # 按时间升序(最早 → 最新)
+        out.sort(key=lambda x: x["period_end"])
+        return out
 
     def _fetch_a_fundamental_akshare(self, code: str) -> dict:
         with _no_proxy():

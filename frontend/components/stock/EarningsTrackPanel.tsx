@@ -37,11 +37,14 @@ const returnColor = (v: string | null): string => {
 };
 
 export function EarningsTrackPanel({ code }: { code: string }) {
-  const { data: surprises = [], isLoading } = useSWR<EarningsSurprise[]>(
+  const { data: raw = [], isLoading } = useSWR<EarningsSurprise[]>(
     ["earnings-surprises", code],
-    () => earningsApi.forStock(code, 8),
+    () => earningsApi.forStock(code, 16),
     { revalidateOnFocus: false },
   );
+
+  // 只展示有实际净利润数据的记录，过滤 auto-track 空壳
+  const surprises = raw.filter((s) => s.actual_net_profit_yi != null);
 
   if (isLoading) {
     return <p className="text-xs text-gray-400">加载财报追踪...</p>;

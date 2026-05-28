@@ -77,6 +77,7 @@ class WatchlistTableRow(BaseModel):
     code: str
     name: str
     market: str
+    is_core: bool = False                      # 核心自选股标记(用于筛选)
     # 维度 3 · 护城河
     gross_margin: float | None = None          # 毛利率 %
     net_margin: float | None = None            # 净利率 %

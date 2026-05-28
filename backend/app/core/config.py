@@ -22,16 +22,29 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
-    # AI
+    # AI 路由 — 主入口选择(deepseek / openrouter / openai / anthropic),空 = 自动 fallback
+    llm_provider_primary: str = ""
+
+    # DeepSeek 直连(OpenAI 兼容接口,价格最低,用户主用)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    # 默认/快速模型(L1 摘要打分)
+    deepseek_model: str = "deepseek-chat"
+    # 深度模型(L2 事件深度分析,会输出 reasoning_content + content)
+    deepseek_deep_model: str = "deepseek-reasoner"
+
     openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-4o-mini"
     anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"
     # 深度报告模型（L2，事件触发，建议 Sonnet 4.6）
     anthropic_model: str = "claude-sonnet-4-6"
     # 摘要/打分模型（L1，每日批量 + 资讯打分）
     anthropic_haiku_model: str = "claude-haiku-4-5-20251001"
     openrouter_api_key: str = ""
-    openrouter_model: str = "google/gemini-2.5-flash"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "deepseek/deepseek-chat"
 
     # 数据源
     tushare_token: str = ""

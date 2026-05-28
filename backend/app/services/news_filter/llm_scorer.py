@@ -3,7 +3,7 @@
 输入：候选新闻列表（每条带 stock 候选与基础信息）
 输出：每条的 direction / strength / sentiment / summary / per-stock relevance 修正
 
-走 ai_analyzer.llm_client.call_llm 统一三 provider fallback (OpenRouter → OpenAI → Anthropic)，
+走 ai_analyzer.llm_client.call_llm 统一 provider fallback (DeepSeek → OpenRouter → OpenAI → Anthropic)，
 prefer_haiku=True 让 Anthropic 路径使用 haiku 模型。
 """
 import json

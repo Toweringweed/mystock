@@ -173,7 +173,7 @@ function PEBadge({ pe }: { pe: number | null }) {
     pe <= 20 ? "text-[#ef5350]" :
     pe <= 35 ? "text-yellow-400" :
     "text-gray-600";
-  return <span className={clsx("tabular-nums font-medium", cls)}>{pe}</span>;
+  return <span className={clsx("tabular-nums font-medium", cls)}>{pe} 倍</span>;
 }
 
 // ─── 涨跌幅颜色 ───────────────────────────────────────────────────────────────
@@ -219,33 +219,33 @@ function ScoreBadge({ score, dim }: { score: number | null | undefined; dim?: st
 }
 
 function moatJudgment(gm: number | null, roe: number | null, nm: number | null): { text: string; tone: Tone } {
-  if (gm == null && roe == null) return { text: "数据不足", tone: "neutral" };
-  if ((gm ?? 0) > 40 && (roe ?? 0) > 20) return { text: "护城河强（高毛利+高ROE）", tone: "bull" };
+  if (gm == null && roe == null) return { text: "财务数据不足", tone: "neutral" };
+  if ((gm ?? 0) > 40 && (roe ?? 0) > 20) return { text: "护城河强(高毛利+高股东回报)", tone: "bull" };
   if ((gm ?? 0) > 30 && (roe ?? 0) > 15) return { text: "护城河稳固", tone: "bull" };
-  if ((gm ?? 100) < 15) return { text: "毛利偏弱，承压", tone: "bear" };
-  if ((roe ?? 100) < 5 && roe != null) return { text: "ROE 偏低，资本回报差", tone: "bear" };
+  if ((gm ?? 100) < 15) return { text: "毛利率偏低,经营承压", tone: "bear" };
+  if ((roe ?? 100) < 5 && roe != null) return { text: "股东回报率偏低(ROE<5%)", tone: "bear" };
   if ((nm ?? 0) > 15) return { text: "净利率优良", tone: "bull" };
   return { text: "护城河中等", tone: "neutral" };
 }
 
 function valuationJudgment(peTtm: number | null, fwd26: number | null, fwd27: number | null): { text: string; tone: Tone } {
-  if (fwd26 == null && peTtm == null) return { text: "数据不足", tone: "neutral" };
-  if (fwd26 != null && fwd26 > 35) return { text: `26远期PE ${fwd26}x · 高于NVDA锚`, tone: "warn" };
-  if (fwd26 != null && fwd26 < 20) return { text: `26远期PE ${fwd26}x · 估值便宜`, tone: "bull" };
-  if (fwd26 != null && fwd26 < 30) return { text: `26远期PE ${fwd26}x · 合理区间`, tone: "bull" };
-  if (peTtm != null && peTtm > 60) return { text: `PE-TTM ${peTtm.toFixed(0)}x · 静态偏高`, tone: "warn" };
-  if (fwd27 != null && fwd27 < 25) return { text: `27远期PE ${fwd27}x · 中期可消化`, tone: "bull" };
-  return { text: "估值已被定价", tone: "neutral" };
+  if (fwd26 == null && peTtm == null) return { text: "估值数据不足", tone: "neutral" };
+  if (fwd26 != null && fwd26 > 35) return { text: `2026 远期 PE ${fwd26} 倍 · 估值偏贵(超 AI 算力基准 25-30 倍)`, tone: "warn" };
+  if (fwd26 != null && fwd26 < 20) return { text: `2026 远期 PE ${fwd26} 倍 · 估值偏低,有安全边际`, tone: "bull" };
+  if (fwd26 != null && fwd26 < 30) return { text: `2026 远期 PE ${fwd26} 倍 · 估值合理`, tone: "bull" };
+  if (peTtm != null && peTtm > 60) return { text: `当前静态 PE ${peTtm.toFixed(0)} 倍 · 偏高`, tone: "warn" };
+  if (fwd27 != null && fwd27 < 25) return { text: `2027 远期 PE ${fwd27} 倍 · 看到 2 年估值可消化`, tone: "bull" };
+  return { text: "估值已充分反映", tone: "neutral" };
 }
 
 function performanceJudgment(profitYoy: number | null, revYoy: number | null): { text: string; tone: Tone } {
-  if (profitYoy == null && revYoy == null) return { text: "数据不足", tone: "neutral" };
-  if (profitYoy != null && profitYoy > 100) return { text: `净利+${profitYoy.toFixed(0)}% 业绩爆发`, tone: "bull" };
-  if (profitYoy != null && profitYoy > 50) return { text: `净利+${profitYoy.toFixed(0)}% 高增长`, tone: "bull" };
-  if (profitYoy != null && profitYoy > 20) return { text: `净利+${profitYoy.toFixed(0)}% 稳健`, tone: "bull" };
-  if (profitYoy != null && profitYoy < 0) return { text: `净利${profitYoy.toFixed(0)}% 业绩下滑`, tone: "bear" };
-  if (revYoy != null && revYoy < 0) return { text: `营收${revYoy.toFixed(0)}% 需求转弱`, tone: "bear" };
-  return { text: "业绩兑现一般", tone: "neutral" };
+  if (profitYoy == null && revYoy == null) return { text: "业绩数据不足", tone: "neutral" };
+  if (profitYoy != null && profitYoy > 100) return { text: `净利同比 +${profitYoy.toFixed(0)}% · 业绩高爆发`, tone: "bull" };
+  if (profitYoy != null && profitYoy > 50) return { text: `净利同比 +${profitYoy.toFixed(0)}% · 高增长`, tone: "bull" };
+  if (profitYoy != null && profitYoy > 20) return { text: `净利同比 +${profitYoy.toFixed(0)}% · 稳健增长`, tone: "bull" };
+  if (profitYoy != null && profitYoy < 0) return { text: `净利同比 ${profitYoy.toFixed(0)}% · 业绩下滑`, tone: "bear" };
+  if (revYoy != null && revYoy < 0) return { text: `营收同比 ${revYoy.toFixed(0)}% · 需求转弱`, tone: "bear" };
+  return { text: "业绩平稳", tone: "neutral" };
 }
 
 // ─── 删除按钮 ─────────────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ const HEADERS: HeaderDef[] = [
   { label: "现价 / 年内", align: "right", width: "w-24", groupStart: true },
   { label: "🎯 目标价\n上行空间", align: "center", width: "w-36", groupStart: true },
   { label: "③ 护城河\n毛利率·ROE", align: "left", width: "w-40", groupStart: true },
-  { label: "估值·远期PE\n26E/27E 利润", align: "left", width: "w-44", groupStart: true },
+  { label: "估值\n2026/2027 净利预测", align: "left", width: "w-44", groupStart: true },
   { label: "⑤ 业绩·财务\n营收/利润 YoY", align: "left", width: "w-48", groupStart: true },
   { label: "①② 行业·拐点·颠覆\nD1+D2", align: "left", width: "w-48", groupStart: true },
   { label: "", align: "center", width: "w-8" },
@@ -335,13 +335,30 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
       <tr className="hover:bg-black/[0.03] peer/data align-top transition-colors group/row">
         {/* 公司(含标签竖排 + 添加入口) */}
         <td className="pt-3 pb-1.5 px-3">
-          <Link
-            href={`/stocks/${row.code}`}
-            className="font-medium text-gray-900 hover:text-[#58a6ff] transition-colors"
-          >
-            {row.name}
-          </Link>
-          <div className="text-[11px] text-gray-400 mt-0.5 tabular-nums">{row.code}</div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={async () => {
+                await stocksApi.setCore(row.code, !row.is_core);
+                onRefresh();
+              }}
+              title={row.is_core ? "取消核心标记" : "标记为核心"}
+              className={clsx(
+                "text-base leading-none transition-colors",
+                row.is_core
+                  ? "text-yellow-400 hover:text-yellow-500"
+                  : "text-gray-300 hover:text-yellow-400",
+              )}
+            >
+              {row.is_core ? "★" : "☆"}
+            </button>
+            <Link
+              href={`/stocks/${row.code}`}
+              className="font-medium text-gray-900 hover:text-[#58a6ff] transition-colors"
+            >
+              {row.name}
+            </Link>
+          </div>
+          <div className="text-[11px] text-gray-400 mt-0.5 tabular-nums ml-[22px]">{row.code}</div>
 
           {/* 标签竖排 + 添加按钮 */}
           <div className="flex flex-col items-start gap-1 mt-2">
@@ -411,9 +428,16 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
               </span>
               {/* score + 加权目标价 */}
               <div className="flex items-center gap-1.5 mt-1 text-[10px] tabular-nums text-gray-600">
-                {row.v5_final_score != null && (
+                {row.claude_overall_score != null ? (
+                  <span
+                    className="font-semibold"
+                    title={`Claude 6D 综合分 ${row.claude_overall_score.toFixed(1)}${row.v5_final_score != null ? ` · v5目标价分 ${row.v5_final_score.toFixed(1)}` : ""}`}
+                  >
+                    分 {row.claude_overall_score.toFixed(1)}
+                  </span>
+                ) : row.v5_final_score != null ? (
                   <span className="font-semibold">分 {row.v5_final_score.toFixed(1)}</span>
-                )}
+                ) : null}
                 {row.v5_avg_target_weighted != null && (
                   <>
                     <span className="text-gray-400">·</span>
@@ -511,22 +535,29 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
 
         {/* 估值 · 远期PE(原 D4 动态赔率维度已并入主决策依据,本列仅作信息展示不计分) */}
         <td className={clsx("pt-3 pb-1.5 px-3", groupBorder)}>
-          <div className="flex items-baseline gap-2 text-xs tabular-nums">
-            <span className="text-gray-500">PE</span>
-            <span className="text-gray-800 font-medium">{row.pe_ttm != null ? row.pe_ttm.toFixed(1) : <span className="text-gray-300">—</span>}</span>
+          <div className="flex items-baseline gap-x-2 gap-y-1 text-xs tabular-nums flex-wrap" title="当前 PE = TTM(过去 12 个月);2026/2027 远期 PE = 当前价 / 机构预测每股收益">
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-gray-500">当前 PE</span>
+              <span className="text-gray-800 font-medium">{row.pe_ttm != null ? `${row.pe_ttm.toFixed(1)} 倍` : <span className="text-gray-300">—</span>}</span>
+            </span>
             <span className="text-gray-300">·</span>
-            <span className="text-gray-500">26/27</span>
-            <span><PEBadge pe={row.forward_pe_2026} /></span>
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-gray-500">2026 远期</span>
+              <PEBadge pe={row.forward_pe_2026} />
+            </span>
             <span className="text-gray-300">/</span>
-            <span><PEBadge pe={row.forward_pe_2027} /></span>
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-gray-500">2027</span>
+              <PEBadge pe={row.forward_pe_2027} />
+            </span>
           </div>
           <div className={clsx("text-xs mt-1 leading-snug", toneCls(valuation.tone))}>{valuation.text}</div>
-          {/* 26E/27E 利润预测(只读小号字,编辑请去详情页) */}
+          {/* 2026/2027 净利润预测(只读,编辑请去详情页) */}
           {(row.forecast_2026 != null || row.forecast_2027 != null) && (
-            <div className="text-[10px] text-gray-400 mt-1.5 tabular-nums">
-              {row.forecast_2026 != null && <span>26E <span className="text-gray-600">{row.forecast_2026.toFixed(1)}</span>亿</span>}
+            <div className="text-[10px] text-gray-400 mt-1.5 tabular-nums" title="机构一致预期净利润">
+              {row.forecast_2026 != null && <span>2026 净利 <span className="text-gray-600">{row.forecast_2026.toFixed(1)}</span> 亿</span>}
               {row.forecast_2026 != null && row.forecast_2027 != null && <span className="mx-1.5 text-gray-300">/</span>}
-              {row.forecast_2027 != null && <span>27E <span className="text-gray-600">{row.forecast_2027.toFixed(1)}</span>亿</span>}
+              {row.forecast_2027 != null && <span>2027 <span className="text-gray-600">{row.forecast_2027.toFixed(1)}</span> 亿</span>}
             </div>
           )}
         </td>
@@ -720,7 +751,13 @@ const SORT_OPTIONS: { key: SortKey; label: string; field: (r: WatchlistTableRow)
   { key: "ytd_change", label: "年内涨幅 ↓", field: (r) => r.ytd_change },
 ];
 
-export function WatchlistTable({ filterTagIds = [] }: { filterTagIds?: number[] }) {
+export function WatchlistTable({
+  filterTagIds = [],
+  coreOnly = false,
+}: {
+  filterTagIds?: number[];
+  coreOnly?: boolean;
+}) {
   const { data, error, isLoading, mutate: revalidate } = useSWR(
     "watchlist-table",
     tableApi.getWatchlist,
@@ -738,12 +775,16 @@ export function WatchlistTable({ filterTagIds = [] }: { filterTagIds?: number[] 
         filterTagIds.every((id) => (row.tags ?? []).some((t) => t.id === id)),
       );
 
+  const coreFiltered = coreOnly
+    ? tagFiltered?.filter((row) => row.is_core)
+    : tagFiltered;
+
   // 应用排序
   const filtered = (() => {
-    if (!tagFiltered || sortKey === "default") return tagFiltered;
+    if (!coreFiltered || sortKey === "default") return coreFiltered;
     const opt = SORT_OPTIONS.find((o) => o.key === sortKey);
-    if (!opt) return tagFiltered;
-    const sorted = [...tagFiltered].sort((a, b) => {
+    if (!opt) return coreFiltered;
+    const sorted = [...coreFiltered].sort((a, b) => {
       const va = opt.field(a);
       const vb = opt.field(b);
       // null 一律排到最后
@@ -776,7 +817,7 @@ export function WatchlistTable({ filterTagIds = [] }: { filterTagIds?: number[] 
       <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <h2 className="text-sm font-semibold text-gray-600">
           自选股 <span className="text-gray-400">
-            ({filtered?.length ?? 0}{filterTagIds.length > 0 && data ? ` / ${data.length}` : ""})
+            ({filtered?.length ?? 0}{(filterTagIds.length > 0 || coreOnly) && data ? ` / ${data.length}` : ""})
           </span>
           <span className="text-xs text-gray-400 ml-2 font-normal">· 🎯 目标价上行空间主导 + 8D 维度</span>
         </h2>

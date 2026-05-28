@@ -40,6 +40,15 @@ class IndustryNews(Base):
         DateTime(timezone=True), index=True
     )  # 流水线处理时间，NULL = 待处理
 
+    # ── P0 资讯升级新增 ──────────────────────────────────────────────
+    # L0 规则识别的催化剂分类: merger/earnings/regulatory/contract/sanction/research/capacity/other
+    catalyst_type: Mapped[str | None] = mapped_column(String(20), index=True)
+    catalyst_summary: Mapped[str | None] = mapped_column(String(120))   # L1.5 LLM: 一句话催化剂(<=100 字)
+    key_risks: Mapped[str | None] = mapped_column(String(240))          # L1.5 LLM: 关键风险(多条以 / 分隔)
+    original_title: Mapped[str | None] = mapped_column(String(500))     # 英文资讯保留原文标题
+    original_lang: Mapped[str | None] = mapped_column(String(5))        # en/zh/...
+    l15_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     stock_relations: Mapped[list["NewsStockRelation"]] = relationship(back_populates="news")
 
 

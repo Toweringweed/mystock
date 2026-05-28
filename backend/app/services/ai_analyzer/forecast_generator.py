@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.fundamental import ProfitForecast, StockFundamental
 from app.models.kline import StockDailyKline
 from app.models.stock import Stock
@@ -238,57 +237,9 @@ async def _save_llm_forecasts(db: AsyncSession, stock: Stock) -> tuple[int, list
 
 
 async def _call_llm(prompt: str, db=None) -> str:
-    async def _get(key: str) -> str:
-        if db is not None:
-            try:
-                from app.services.settings_service import get_effective_value
-                return await get_effective_value(db, key)
-            except Exception:
-                pass
-        return str(getattr(settings, key, "") or "")
+    from app.services.ai_analyzer.llm_client import call_llm
 
-    try:
-        or_key = await _get("openrouter_api_key")
-        or_model = await _get("openrouter_model") or settings.openrouter_model
-        if or_key:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
-            resp = await client.chat.completions.create(
-                model=or_model, messages=[{"role": "user", "content": prompt}],
-                temperature=0.2, max_tokens=500,
-            )
-            return resp.choices[0].message.content or ""
-    except Exception as e:
-        logger.warning(f"OpenRouter 预测失败: {e}")
-
-    try:
-        oai_key = await _get("openai_api_key")
-        oai_model = await _get("openai_model") or settings.openai_model
-        if oai_key:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=oai_key)
-            resp = await client.chat.completions.create(
-                model=oai_model, messages=[{"role": "user", "content": prompt}],
-                temperature=0.2, max_tokens=500,
-            )
-            return resp.choices[0].message.content or ""
-    except Exception as e:
-        logger.warning(f"OpenAI 预测失败: {e}")
-
-    try:
-        ant_key = await _get("anthropic_api_key")
-        ant_model = await _get("anthropic_model") or settings.anthropic_model
-        if ant_key:
-            import anthropic
-            client = anthropic.AsyncAnthropic(api_key=ant_key)
-            resp = await client.messages.create(
-                model=ant_model, max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return resp.content[0].text
-    except Exception as e:
-        logger.error(f"Anthropic 预测失败: {e}")
-    return ""
+    return await call_llm(db, prompt, temperature=0.2, max_tokens=500)
 
 
 def _parse(raw: str) -> dict:

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas.news import NewsRead
+from app.schemas.news import NewsDetailRead, NewsRead
 
 router = APIRouter()
 
@@ -31,6 +31,19 @@ async def delete_news(
     deleted = await _delete(db, news_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="资讯不存在")
+
+
+@router.get("/detail/{news_id}", response_model=NewsDetailRead)
+async def get_news_detail(
+    news_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """资讯详情(含正文 + 关联股票 + L0/L1.5 催化剂分析)"""
+    from app.services.news_service import get_news_detail as _get
+    detail = await _get(db, news_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="资讯不存在")
+    return detail
 
 
 @router.get("/{code}", response_model=list[NewsRead])

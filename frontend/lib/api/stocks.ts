@@ -7,7 +7,13 @@ export interface StockRead {
   name: string;
   industry: string | null;
   is_watchlist: boolean;
+  is_core: boolean;
   data_ready: boolean;
+  sync_status: string;
+  sync_task_id: string | null;
+  sync_error: string | null;
+  sync_started_at: string | null;
+  sync_completed_at: string | null;
 }
 
 export interface StockSearch {
@@ -23,5 +29,7 @@ export const stocksApi = {
   add: (code: string, market: string, name?: string) =>
     api.post<StockRead>("/stocks/watchlist", { code, market, name }),
   remove: (code: string) => api.delete(`/stocks/watchlist/${code}`),
+  setCore: (code: string, is_core: boolean) =>
+    api.patch<StockRead>(`/stocks/watchlist/${code}/core`, { is_core }),
   get: (code: string) => api.get<StockRead>(`/stocks/${code}`),
 };

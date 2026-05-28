@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas.stock import StockCreate, StockRead, StockSearch
+from app.schemas.stock import StockCoreUpdate, StockCreate, StockRead, StockSearch
 from app.schemas.analysis import WatchlistTableRow
 
 router = APIRouter()
@@ -45,10 +45,33 @@ async def add_to_watchlist(
     db: AsyncSession = Depends(get_db),
 ):
     """添加自选股，触发数据回填任务"""
-    from app.services.stock_service import add_to_watchlist as _add
+    from app.services.stock_service import (
+        add_to_watchlist as _add,
+        mark_sync_failed,
+        mark_sync_pending,
+        trigger_backfill,
+    )
     stock = await _add(db, payload)
     if not stock:
         raise HTTPException(status_code=404, detail="股票不存在或不支持")
+    code = stock.code
+    market = stock.market
+    needs_backfill = not stock.data_ready
+    await db.commit()
+    await db.refresh(stock)
+    if needs_backfill:
+        try:
+            task_id = trigger_backfill(code, market)
+            await mark_sync_pending(db, code, task_id)
+            await db.commit()
+            await db.refresh(stock)
+        except Exception as e:
+            await mark_sync_failed(db, code, f"提交回填任务失败: {e}")
+            await db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="自选股已添加，但数据回填任务提交失败，请稍后在设置页手动刷新",
+            ) from e
     return stock
 
 
@@ -60,6 +83,20 @@ async def remove_from_watchlist(
     """从自选股移除（历史数据保留）"""
     from app.services.stock_service import remove_from_watchlist as _remove
     await _remove(db, code)
+
+
+@router.patch("/watchlist/{code}/core", response_model=StockRead)
+async def set_core_flag(
+    code: str,
+    payload: StockCoreUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """标记/取消核心自选股"""
+    from app.services.stock_service import set_core_flag as _set
+    stock = await _set(db, code, payload.is_core)
+    if not stock:
+        raise HTTPException(status_code=404, detail="股票不存在或不在自选股中")
+    return stock
 
 
 @router.get("/{code}", response_model=StockRead)

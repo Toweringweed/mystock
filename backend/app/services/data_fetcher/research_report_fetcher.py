@@ -20,14 +20,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 logger = logging.getLogger(__name__)
 
 _RATE_LIMIT_DELAY = 0.5
-_IN_DOCKER = os.path.exists("/.dockerenv")
 
 
 @contextlib.contextmanager
 def _no_proxy():
-    if _IN_DOCKER:
-        yield
-        return
     proxy_keys = ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"]
     saved = {k: os.environ.pop(k, None) for k in proxy_keys}
     try:
