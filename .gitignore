@@ -226,6 +226,11 @@ backup.sql
 /.agents/
 /.claude/
 /.codex-tmp/
+*.md
+*.MD
+!/README.md
+/doc/
+/docs/
 /*-claude-score*.json
 /*_payload.json
 /*_research_entries.json
