@@ -1,0 +1,161 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mystock-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mystock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mystock123}
+      POSTGRES_DB: ${POSTGRES_DB:-mystock_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mystock} -d ${POSTGRES_DB:-mystock_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mystock-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mystock-backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mystock}:${POSTGRES_PASSWORD:-mystock123}@postgres:5432/${POSTGRES_DB:-mystock_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,frontend
+    ports:
+      - "8500:8000"
+    volumes:
+      - annual_reports:/app/data/annual_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mystock-celery-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mystock}:${POSTGRES_PASSWORD:-mystock123}@postgres:5432/${POSTGRES_DB:-mystock_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_WORKER_RUNNING: "true"
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,frontend
+    volumes:
+      - annual_reports:/app/data/annual_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    restart: unless-stopped
+
+  celery-data-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mystock-celery-data-worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mystock}:${POSTGRES_PASSWORD:-mystock123}@postgres:5432/${POSTGRES_DB:-mystock_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_WORKER_RUNNING: "true"
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,frontend
+    volumes:
+      - annual_reports:/app/data/annual_reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=1 -Q data -n data@%h
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mystock-celery-beat
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mystock}:${POSTGRES_PASSWORD:-mystock123}@postgres:5432/${POSTGRES_DB:-mystock_db}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_WORKER_RUNNING: "true"
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,frontend
+    depends_on:
+      - celery-worker
+    command: celery -A app.tasks.celery_app beat --loglevel=info --scheduler celery.beat:PersistentScheduler
+    restart: unless-stopped
+
+  x-crawler:
+    build:
+      context: ./x-crawler
+      dockerfile: Dockerfile
+    container_name: mystock-x-crawler
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      X_AUTH_TOKEN: ${X_AUTH_TOKEN:-}
+      X_CT0_TOKEN: ${X_CT0_TOKEN:-}
+      X_KOL_HANDLES: ${X_KOL_HANDLES:-}
+      X_CRAWL_INTERVAL_MINUTES: ${X_CRAWL_INTERVAL_MINUTES:-30}
+      NO_PROXY: localhost,127.0.0.1,postgres,redis,backend,frontend
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        SERVER_API_URL: http://backend:8000
+    container_name: mystock-frontend
+    environment:
+      SERVER_API_URL: http://backend:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "3010:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  annual_reports:

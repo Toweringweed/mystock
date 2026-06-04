@@ -12,6 +12,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG SERVER_API_URL=http://backend:8000
+ENV SERVER_API_URL=${SERVER_API_URL}
 RUN pnpm build
 
 # ─── 运行阶段 ────────────────────────────────────────────────────
@@ -19,6 +21,7 @@ FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV SERVER_API_URL=http://backend:8000
 
 RUN addgroup --system --gid 1001 nodejs \
     && adduser --system --uid 1001 nextjs

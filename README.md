@@ -30,9 +30,9 @@ MyStock is a self-hosted stock research workspace for A-share, Hong Kong, and se
 |-- backend/          # FastAPI API, Celery tasks, data ingestion, AI services, database models
 |-- frontend/         # Next.js frontend
 |-- x-crawler/        # Standalone X.com timeline crawler
-|-- docs/             # Architecture, data sources, deployment, and release notes
 |-- scripts/          # Operational helper scripts
 |-- docker-compose.yml
+|-- docker-compose.prod.yml
 `-- .env.example
 ```
 
@@ -60,7 +60,7 @@ At minimum, review or change:
 - Optional notification webhook: `WECHAT_WORK_WEBHOOK_URL`
 - Optional X.com crawler settings: `X_AUTH_TOKEN`, `X_CT0_TOKEN`, `X_KOL_HANDLES`
 
-### 3. Start services
+### 3. Start local development services
 
 ```bash
 docker compose up -d --build
@@ -98,14 +98,38 @@ docker compose logs -f celery-beat
 docker compose down
 ```
 
-## Documentation
+## Private Server Deployment
 
-- [Deployment guide](docs/deployment.md)
-- [Development guide](docs/development.md)
-- [Data sources](docs/data-sources.md)
-- [Data flow](docs/data-flow.md)
-- [MCP data dictionary](docs/mcp-data-dictionary.md)
-- [GitHub release checklist](docs/github-release-checklist.md)
+For a Linux server with Docker Engine and Docker Compose v2 installed:
+
+```bash
+git clone https://github.com/Toweringweed/mystock.git
+cd mystock
+cp .env.example .env
+```
+
+Edit `.env` before first startup. At minimum, change:
+
+```env
+ENVIRONMENT=production
+POSTGRES_PASSWORD=replace-me
+SECRET_KEY=replace-me-with-a-random-secret
+```
+
+Then start the production stack:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml exec backend alembic upgrade head
+docker compose -f docker-compose.prod.yml ps
+```
+
+Default public service ports:
+
+- Frontend: `http://SERVER_IP:3010`
+- Backend API: `http://SERVER_IP:8500`
+
+The production compose file does not publish PostgreSQL or Redis ports and does not mount source code into containers.
 
 ## Security Notes
 
