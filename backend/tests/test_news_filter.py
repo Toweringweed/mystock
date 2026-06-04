@@ -4,9 +4,10 @@
 """
 from app.services.news_filter import dedup, entity_matcher, rule_scorer, urgency_classifier
 from app.services.news_filter.keyword_builder import (
-    KeywordEntry, derive_short_name, normalize_code_variants,
+    KeywordEntry,
+    derive_short_name,
+    normalize_code_variants,
 )
-
 
 # ────────────────── keyword_builder ──────────────────
 

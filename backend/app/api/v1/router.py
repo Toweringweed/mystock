@@ -1,6 +1,20 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import stocks, kline, analysis, news, supply_chain, settings, tags, research, analyst_reports, backtest, earnings_surprises, estimate_revisions, target_price
+from app.api.v1.endpoints import (
+    analysis,
+    analyst_reports,
+    backtest,
+    earnings_surprises,
+    estimate_revisions,
+    kline,
+    news,
+    research,
+    settings,
+    stocks,
+    supply_chain,
+    tags,
+    target_price,
+)
 
 api_router = APIRouter()
 

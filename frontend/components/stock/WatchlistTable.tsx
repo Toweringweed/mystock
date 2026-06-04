@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, type ReactNode } from "react";
 import useSWR, { mutate } from "swr";
 import { tableApi, WatchlistTableRow } from "@/lib/api/table";
 import { stocksApi } from "@/lib/api/stocks";
@@ -188,6 +188,32 @@ function ChangeCell({ value }: { value: number | null }) {
   );
 }
 
+function ClampText({
+  children,
+  className,
+  lines = 1,
+  title,
+}: {
+  children: ReactNode;
+  className?: string;
+  lines?: number;
+  title?: string;
+}) {
+  return (
+    <div
+      title={title}
+      className={clsx("overflow-hidden", className)}
+      style={{
+        display: "-webkit-box",
+        WebkitLineClamp: lines,
+        WebkitBoxOrient: "vertical",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ─── 6 维度结论文字 ───────────────────────────────────────────────────────────
 
 type Tone = "bull" | "bear" | "neutral" | "warn";
@@ -289,14 +315,14 @@ type HeaderDef = {
 };
 
 const HEADERS: HeaderDef[] = [
-  { label: "公司", align: "left", width: "w-28" },
-  { label: "现价 / 年内", align: "right", width: "w-24", groupStart: true },
-  { label: "🎯 目标价\n上行空间", align: "center", width: "w-36", groupStart: true },
-  { label: "③ 护城河\n毛利率·ROE", align: "left", width: "w-40", groupStart: true },
-  { label: "估值\n2026/2027 净利预测", align: "left", width: "w-44", groupStart: true },
-  { label: "⑤ 业绩·财务\n营收/利润 YoY", align: "left", width: "w-48", groupStart: true },
-  { label: "①② 行业·拐点·颠覆\nD1+D2", align: "left", width: "w-48", groupStart: true },
-  { label: "", align: "center", width: "w-8" },
+  { label: "公司", align: "left", width: "w-24" },
+  { label: "现价\n年内", align: "right", width: "w-20", groupStart: true },
+  { label: "目标价\n上行", align: "center", width: "w-28", groupStart: true },
+  { label: "③ 护城河\n毛利·ROE", align: "left", width: "w-32", groupStart: true },
+  { label: "估值\nPE·净利", align: "left", width: "w-40", groupStart: true },
+  { label: "⑤ 业绩\n营收·利润", align: "left", width: "w-36", groupStart: true },
+  { label: "①② 行业\n拐点·颠覆", align: "left", width: "w-40", groupStart: true },
+  { label: "", align: "center", width: "w-6" },
 ];
 
 function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () => void }) {
@@ -332,10 +358,10 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
   return (
     <>
       {/* ── 数据行（硬指标） ─────────────────────────────────────────── */}
-      <tr className="hover:bg-black/[0.03] peer/data align-top transition-colors group/row">
+      <tr className="hover:bg-[#f8fafc] peer/data align-top transition-colors group/row">
         {/* 公司(含标签竖排 + 添加入口) */}
-        <td className="pt-3 pb-1.5 px-3">
-          <div className="flex items-center gap-1.5">
+        <td className="pt-2 pb-1 px-2.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <button
               onClick={async () => {
                 await stocksApi.setCore(row.code, !row.is_core);
@@ -343,7 +369,7 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
               }}
               title={row.is_core ? "取消核心标记" : "标记为核心"}
               className={clsx(
-                "text-base leading-none transition-colors",
+                "text-sm leading-none transition-colors shrink-0",
                 row.is_core
                   ? "text-yellow-400 hover:text-yellow-500"
                   : "text-gray-300 hover:text-yellow-400",
@@ -353,15 +379,15 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
             </button>
             <Link
               href={`/stocks/${row.code}`}
-              className="font-medium text-gray-900 hover:text-[#58a6ff] transition-colors"
+              className="font-semibold text-gray-900 hover:text-[#58a6ff] transition-colors truncate"
             >
               {row.name}
             </Link>
           </div>
-          <div className="text-[11px] text-gray-400 mt-0.5 tabular-nums ml-[22px]">{row.code}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums ml-[20px]">{row.code}</div>
 
-          {/* 标签竖排 + 添加按钮 */}
-          <div className="flex flex-col items-start gap-1 mt-2">
+          {/* 标签紧凑横排 + 添加按钮 */}
+          <div className="flex flex-wrap items-center gap-1 mt-1.5">
             {row.tags?.map((t) => (
               <TagChip
                 key={t.id}
@@ -378,8 +404,8 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
         </td>
 
         {/* 现价 / 年内涨幅 — 合并列 */}
-        <td className={clsx("pt-3 pb-1.5 px-2 text-right", groupBorder)}>
-          <div className="text-sm font-semibold tabular-nums text-gray-800 leading-tight">
+        <td className={clsx("pt-2 pb-1 px-2 text-right", groupBorder)}>
+          <div className="text-[15px] font-semibold tabular-nums text-gray-800 leading-tight">
             {row.current_price != null ? row.current_price.toFixed(2) : <span className="text-gray-300">—</span>}
           </div>
           <div className="mt-0.5 text-[11px]">
@@ -388,11 +414,11 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
         </td>
 
         {/* 🎯 目标价上行空间 — v5 主决策信号 */}
-        <td className={clsx("pt-3 pb-1.5 px-2 text-center", groupBorder)}>
+        <td className={clsx("pt-2 pb-1 px-2 text-center", groupBorder)}>
           {row.v5_upside_pct != null ? (
             <div
               className={clsx(
-                "inline-flex flex-col items-center justify-center px-2 py-1.5 rounded-lg border relative min-w-[100px]",
+                "inline-flex flex-col items-center justify-center px-2 py-1 rounded-md border relative min-w-[92px] shadow-sm",
                 row.v5_veto_triggered
                   ? "bg-red-100 border-red-500"
                   : row.v5_upside_pct >= 15
@@ -418,7 +444,7 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
               )}
               {/* 大号上行空间 % */}
               <span className={clsx(
-                "text-xl font-bold tabular-nums leading-none",
+                "text-lg font-bold tabular-nums leading-none",
                 row.v5_veto_triggered ? "text-red-700"
                   : row.v5_upside_pct >= 5 ? "text-[#ef5350]"
                   : row.v5_upside_pct >= -5 ? "text-gray-700"
@@ -427,7 +453,7 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
                 {row.v5_upside_pct >= 0 ? "+" : ""}{row.v5_upside_pct.toFixed(1)}%
               </span>
               {/* score + 加权目标价 */}
-              <div className="flex items-center gap-1.5 mt-1 text-[10px] tabular-nums text-gray-600">
+              <div className="flex items-center gap-1.5 mt-0.5 text-[10px] tabular-nums text-gray-600">
                 {row.claude_overall_score != null ? (
                   <span
                     className="font-semibold"
@@ -446,7 +472,7 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
                 )}
               </div>
               {/* 鲜度 + bonus 徽章 */}
-              <div className="flex items-center gap-1 mt-1">
+              <div className="flex items-center gap-1 mt-0.5">
                 {row.v5_freshness_status && (
                   <span className={clsx(
                     "text-[9px] px-1 rounded",
@@ -478,7 +504,7 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
 
           {/* 重要消息预告 + 警示徽章组(财报临近 + 上次 surprise) */}
           {(row.days_to_earnings != null && row.days_to_earnings <= 30) || row.last_earnings_surprise_direction ? (
-            <div className="flex flex-col items-center gap-1 mt-2">
+            <div className="flex flex-wrap justify-center gap-1 mt-1">
               {row.days_to_earnings != null && row.days_to_earnings <= 30 && (
                 <div
                   className={clsx(
@@ -517,8 +543,8 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
         </td>
 
         {/* ③ 护城河 */}
-        <td className={clsx("pt-3 pb-1.5 px-3", groupBorder)}>
-          <div className="flex items-baseline gap-2 text-xs tabular-nums">
+        <td className={clsx("pt-2 pb-1 px-2.5", groupBorder)}>
+          <div className="flex items-baseline gap-1.5 text-xs tabular-nums whitespace-nowrap">
             <span className="text-gray-500">毛利</span>
             <span className={clsx("font-medium", row.gross_margin != null && row.gross_margin > 40 ? "text-[#ef5350]" : "text-gray-800")}>
               {row.gross_margin != null ? `${row.gross_margin.toFixed(1)}%` : <span className="text-gray-300">—</span>}
@@ -530,12 +556,14 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
             </span>
             <ScoreBadge score={row.claude_moat_score} dim="③" />
           </div>
-          <div className={clsx("text-xs mt-1 leading-snug", toneCls(moat.tone))}>{moat.text}</div>
+          <ClampText className={clsx("text-[11px] mt-0.5 leading-snug", toneCls(moat.tone))} title={moat.text}>
+            {moat.text}
+          </ClampText>
         </td>
 
         {/* 估值 · 远期PE(原 D4 动态赔率维度已并入主决策依据,本列仅作信息展示不计分) */}
-        <td className={clsx("pt-3 pb-1.5 px-3", groupBorder)}>
-          <div className="flex items-baseline gap-x-2 gap-y-1 text-xs tabular-nums flex-wrap" title="当前 PE = TTM(过去 12 个月);2026/2027 远期 PE = 当前价 / 机构预测每股收益">
+        <td className={clsx("pt-2 pb-1 px-2.5", groupBorder)}>
+          <div className="flex items-baseline gap-x-1.5 gap-y-0.5 text-xs tabular-nums flex-wrap" title="当前 PE = TTM(过去 12 个月);2026/2027 远期 PE = 当前价 / 机构预测每股收益">
             <span className="inline-flex items-baseline gap-1">
               <span className="text-gray-500">当前 PE</span>
               <span className="text-gray-800 font-medium">{row.pe_ttm != null ? `${row.pe_ttm.toFixed(1)} 倍` : <span className="text-gray-300">—</span>}</span>
@@ -551,10 +579,12 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
               <PEBadge pe={row.forward_pe_2027} />
             </span>
           </div>
-          <div className={clsx("text-xs mt-1 leading-snug", toneCls(valuation.tone))}>{valuation.text}</div>
+          <ClampText lines={2} className={clsx("text-[11px] mt-0.5 leading-snug", toneCls(valuation.tone))} title={valuation.text}>
+            {valuation.text}
+          </ClampText>
           {/* 2026/2027 净利润预测(只读,编辑请去详情页) */}
           {(row.forecast_2026 != null || row.forecast_2027 != null) && (
-            <div className="text-[10px] text-gray-400 mt-1.5 tabular-nums" title="机构一致预期净利润">
+            <div className="text-[10px] text-gray-400 mt-1 tabular-nums leading-snug" title="机构一致预期净利润">
               {row.forecast_2026 != null && <span>2026 净利 <span className="text-gray-600">{row.forecast_2026.toFixed(1)}</span> 亿</span>}
               {row.forecast_2026 != null && row.forecast_2027 != null && <span className="mx-1.5 text-gray-300">/</span>}
               {row.forecast_2027 != null && <span>2027 <span className="text-gray-600">{row.forecast_2027.toFixed(1)}</span> 亿</span>}
@@ -563,8 +593,8 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
         </td>
 
         {/* ⑤ 业绩·财务 — 营收/利润 YoY + Claude 评分(对应详情页 D3 护城河 evidence) */}
-        <td className={clsx("pt-3 pb-1.5 px-3", groupBorder)}>
-          <div className="flex items-baseline gap-2 text-xs tabular-nums flex-wrap">
+        <td className={clsx("pt-2 pb-1 px-2.5", groupBorder)}>
+          <div className="flex items-baseline gap-1.5 text-xs tabular-nums flex-wrap">
             <span className="text-gray-500">营收</span>
             <span className={clsx("font-medium", row.revenue_yoy != null ? (row.revenue_yoy > 0 ? "text-[#ef5350]" : "text-[#26a69a]") : "text-gray-300")}>
               {row.revenue_yoy != null ? `${row.revenue_yoy > 0 ? "+" : ""}${row.revenue_yoy.toFixed(1)}%` : "—"}
@@ -576,11 +606,13 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
             </span>
             <ScoreBadge score={row.claude_performance_score} dim="⑤" />
           </div>
-          <div className={clsx("text-xs mt-1 leading-snug", toneCls(performance.tone))}>{performance.text}</div>
+          <ClampText className={clsx("text-[11px] mt-0.5 leading-snug", toneCls(performance.tone))} title={performance.text}>
+            {performance.text}
+          </ClampText>
         </td>
 
         {/* ①② 行业景气 · 拐点 · 颠覆 — D1 + D2 + 拐点/颠覆文字 */}
-        <td className={clsx("pt-3 pb-1.5 px-3", groupBorder)}>
+        <td className={clsx("pt-2 pb-1 px-2.5", groupBorder)}>
           <div className="flex items-center gap-2 text-xs">
             {row.claude_industry_score != null ? (
               <span className="inline-flex items-baseline gap-1">
@@ -600,104 +632,98 @@ function TableRow({ row, onRefresh }: { row: WatchlistTableRow; onRefresh: () =>
           </div>
           {/* 拐点 + 颠覆 文字(各自一行) */}
           {row.industry_inflection && (
-            <div className="text-[11px] mt-1.5 leading-snug text-gray-600">
+            <ClampText className="text-[11px] mt-1 leading-snug text-gray-600" title={row.industry_inflection}>
               <span className="text-[#58a6ff] font-semibold mr-1">拐点</span>
               {row.industry_inflection}
-            </div>
+            </ClampText>
           )}
           {row.external_disruption && (
-            <div className="text-[11px] mt-1 leading-snug text-gray-600">
+            <ClampText className="text-[11px] mt-0.5 leading-snug text-gray-600" title={row.external_disruption}>
               <span className="text-yellow-500/80 font-semibold mr-1">颠覆</span>
               {row.external_disruption}
-            </div>
+            </ClampText>
           )}
         </td>
 
         {/* 删除 */}
-        <td className="pt-3 pb-1.5 px-1 text-center">
+        <td className="pt-2 pb-1 px-1 text-center">
           <RemoveButton code={row.code} />
         </td>
       </tr>
 
       {/* ── Narrative 行(标签 + AI 结论 + 治理/Veto + 操作建议)─────────── */}
       {/* 跨列布局:col 1 留空(公司),cols 2-7 整体左移到现价/年内列起,col 8 留空(×) */}
-      <tr className="border-b border-gray-200 bg-black/[0.015] peer-hover/data:bg-black/[0.03] hover:bg-black/[0.03] transition-colors group/row">
-        <td className="pt-0 pb-2.5 px-3"></td>
-        <td colSpan={6} className={clsx("pt-1 pb-2.5 px-3", groupBorder)}>
-          <div className="space-y-1.5">
-            {/* ⑧ 治理 + Veto 警告(标签已迁移到公司列) */}
-            {(row.claude_governance_score != null || row.claude_veto_triggered) && (
-              <div className="flex flex-wrap items-center gap-1">
-                {row.claude_governance_score != null && (
-                  <span className="inline-flex items-baseline gap-1">
-                    <span className="text-[10px] text-purple-400 font-semibold">治理</span>
-                    <ScoreBadge score={row.claude_governance_score} dim="⑧" />
-                  </span>
-                )}
-                {row.claude_veto_triggered && (
-                  <span
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 border border-red-500 text-[10px] text-red-700 font-semibold"
-                    title={row.claude_veto_reason ?? "Veto 触发"}
-                  >
-                    ⚠ Veto
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* AI 一句话结论 */}
-            {row.ai_conclusion && (
-              <div className="text-xs text-gray-700 leading-relaxed">
-                <span className="text-gray-400 mr-1.5 text-[10px] font-semibold tracking-wide">AI</span>
-                {row.ai_conclusion}
-              </div>
-            )}
-
-            {/* 技术分析(只读) */}
-            {row.technical_analysis && (
-              <div className="flex items-start gap-2 text-xs">
-                <span className="text-[#58a6ff] font-semibold shrink-0 mt-0.5 text-[11px]">技术</span>
-                <div className="flex-1 min-w-0 text-gray-600 leading-relaxed whitespace-pre-wrap">
-                  {row.technical_analysis}
+      <tr className="border-b border-gray-200 bg-[#f8fafc] peer-hover/data:bg-[#f3f7fb] hover:bg-[#f3f7fb] transition-colors group/row">
+        <td className="pt-0 pb-1.5 px-2.5"></td>
+        <td colSpan={6} className={clsx("pt-0 pb-1.5 px-2.5", groupBorder)}>
+          <div className="rounded-md border border-gray-200/80 bg-white/70 px-2 py-1.5 shadow-[0_1px_0_rgba(15,23,42,0.03)]">
+            <div className="flex items-center gap-2 min-w-0">
+              {(row.claude_governance_score != null || row.claude_veto_triggered) && (
+                <div className="flex shrink-0 items-center gap-1">
+                  {row.claude_governance_score != null && (
+                    <span className="inline-flex items-baseline gap-1">
+                      <span className="text-[10px] text-purple-400 font-semibold">治理</span>
+                      <ScoreBadge score={row.claude_governance_score} dim="⑧" />
+                    </span>
+                  )}
+                  {row.claude_veto_triggered && (
+                    <span
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-red-100 border border-red-500 text-[10px] text-red-700 font-semibold"
+                      title={row.claude_veto_reason ?? "Veto 触发"}
+                    >
+                      ⚠ Veto
+                    </span>
+                  )}
                 </div>
-              </div>
-            )}
+              )}
+              {row.ai_conclusion && (
+                <ClampText className="min-w-0 flex-1 text-xs text-gray-700 leading-snug" title={row.ai_conclusion}>
+                  <span className="text-gray-400 mr-1.5 text-[10px] font-semibold tracking-wide">AI</span>
+                  {row.ai_conclusion}
+                </ClampText>
+              )}
+            </div>
 
-            {/* 操作建议(可编辑) */}
-            <div className="flex items-start gap-2 text-xs">
-              <span className="text-[#26a69a] font-semibold shrink-0 mt-1">建议</span>
-              <div className="flex-1 min-w-0">
+            <div className="mt-1 grid grid-cols-1 xl:grid-cols-[1.2fr_1fr_1fr] gap-1.5 text-xs">
+              {row.technical_analysis && (
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[#58a6ff] font-semibold shrink-0 text-[11px]">技术</span>
+                  <ClampText className="min-w-0 text-gray-600 leading-snug whitespace-pre-wrap" title={row.technical_analysis}>
+                    {row.technical_analysis}
+                  </ClampText>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[#26a69a] font-semibold shrink-0 text-[11px]">建议</span>
                 <EditableCell
                   value={recDisplay}
                   placeholder="点击输入操作建议"
                   onSave={saveRecommendation}
                   className={clsx(
-                    "leading-relaxed whitespace-normal",
+                    "min-h-[20px] w-full leading-snug whitespace-nowrap overflow-hidden text-ellipsis",
                     isAiDefault && "text-gray-600 italic"
                   )}
                 />
-                {isAiDefault && (
-                  <div className="text-[10px] text-gray-300 mt-0.5">AI 默认建议 · 点击编辑可覆盖</div>
-                )}
               </div>
-            </div>
 
-            {/* 个人笔记(可编辑) */}
-            <div className="flex items-start gap-2 text-xs">
-              <span className="text-yellow-500/80 font-semibold shrink-0 mt-1">笔记</span>
-              <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-yellow-500/80 font-semibold shrink-0 text-[11px]">笔记</span>
                 <EditableCell
                   value={row.personal_note}
-                  placeholder="点击输入个人笔记(投资逻辑/观察点/复盘记录)"
+                  placeholder="点击输入个人笔记"
                   onSave={savePersonalNote}
-                  className="leading-relaxed whitespace-normal text-gray-700"
+                  className="min-h-[20px] w-full leading-snug whitespace-nowrap overflow-hidden text-ellipsis text-gray-700"
                 />
               </div>
             </div>
+            {isAiDefault && (
+              <div className="text-[10px] text-gray-300 mt-0.5 pl-[34px]">AI 默认建议 · 点击编辑可覆盖</div>
+            )}
           </div>
         </td>
         {/* 右侧 1 列留空对齐:× */}
-        <td className="pt-0 pb-2.5"></td>
+        <td className="pt-0 pb-1.5"></td>
       </tr>
     </>
   );
@@ -814,17 +840,17 @@ export function WatchlistTable({
 
   return (
     <div className="overflow-x-auto">
-      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+      <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
         <h2 className="text-sm font-semibold text-gray-600">
           自选股 <span className="text-gray-400">
             ({filtered?.length ?? 0}{(filterTagIds.length > 0 || coreOnly) && data ? ` / ${data.length}` : ""})
           </span>
-          <span className="text-xs text-gray-400 ml-2 font-normal">· 🎯 目标价上行空间主导 + 8D 维度</span>
+          <span className="text-xs text-gray-400 ml-2 font-normal">· 目标价主导 + 8D</span>
         </h2>
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-1.5 ml-auto">
           <Link
             href="/supply-chain"
-            className="text-xs px-2.5 py-1 bg-[#58a6ff]/10 text-[#58a6ff] border border-[#58a6ff]/30 rounded hover:bg-[#58a6ff]/20 transition-colors"
+            className="text-xs px-2 py-0.5 bg-[#58a6ff]/10 text-[#58a6ff] border border-[#58a6ff]/30 rounded hover:bg-[#58a6ff]/20 transition-colors"
           >
             📊 全局供应链图
           </Link>
@@ -833,7 +859,7 @@ export function WatchlistTable({
           <select
             value={sortKey}
             onChange={(e) => setSortKey(e.target.value as SortKey)}
-            className="text-xs bg-[#f0f3f6] border border-gray-300 rounded px-2 py-1 text-gray-700 outline-none hover:border-gray-600"
+            className="text-xs bg-[#f0f3f6] border border-gray-300 rounded px-2 py-0.5 text-gray-700 outline-none hover:border-gray-600"
           >
             {SORT_OPTIONS.map((o) => (
               <option key={o.key} value={o.key}>{o.label}</option>
@@ -843,7 +869,7 @@ export function WatchlistTable({
             <button
               onClick={() => setSortDir(sortDir === "desc" ? "asc" : "desc")}
               title={sortDir === "desc" ? "切换升序" : "切换降序"}
-              className="text-xs px-2 py-1 bg-[#f0f3f6] border border-gray-300 rounded text-gray-700 hover:border-gray-600"
+              className="text-xs px-2 py-0.5 bg-[#f0f3f6] border border-gray-300 rounded text-gray-700 hover:border-gray-600"
             >
               {sortDir === "desc" ? "↓" : "↑"}
             </button>
@@ -851,14 +877,14 @@ export function WatchlistTable({
         </div>
       </div>
 
-      <table className="w-full text-sm border-collapse">
+      <table className="w-full text-[13px] border-collapse">
         <thead className="sticky top-0 z-20">
-          <tr className="border-b-2 border-gray-300 shadow-sm">
+          <tr className="border-b border-gray-300 shadow-sm">
             {HEADERS.map((h, i) => (
               <th
                 key={i}
                 className={clsx(
-                  "py-2.5 px-3 text-[11px] font-semibold text-gray-700 whitespace-pre-line uppercase tracking-wide bg-[#eef4fc]",
+                  "py-2 px-2.5 text-[11px] font-semibold text-gray-700 whitespace-pre-line bg-[#eef4fc]",
                   h.align === "right" && "text-right",
                   h.align === "center" && "text-center",
                   h.align === "left" && "text-left",

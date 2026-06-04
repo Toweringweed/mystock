@@ -1,5 +1,4 @@
 """事件检测编排器"""
-import asyncio
 import logging
 from datetime import date
 

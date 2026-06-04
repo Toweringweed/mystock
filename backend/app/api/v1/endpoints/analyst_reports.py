@@ -10,7 +10,9 @@ from app.core.database import get_db
 from app.models.analyst_report import AnalystReport
 from app.models.stock import Stock
 from app.schemas.analyst_report import (
-    AnalystReportBulkInput, AnalystReportBulkResult, AnalystReportRead,
+    AnalystReportBulkInput,
+    AnalystReportBulkResult,
+    AnalystReportRead,
 )
 
 router = APIRouter()

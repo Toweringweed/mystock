@@ -1,6 +1,6 @@
 """券商研报 API"""
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -51,7 +51,7 @@ async def add_manual_research(
         raise HTTPException(404, f"股票 {payload.code} 不存在")
 
     try:
-        published_at = datetime.strptime(payload.report_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        published_at = datetime.strptime(payload.report_date, "%Y-%m-%d").replace(tzinfo=UTC)
     except ValueError:
         raise HTTPException(400, f"report_date 必须 YYYY-MM-DD: {payload.report_date}")
 

@@ -59,7 +59,7 @@ export function ResearchPanel({ code }: { code: string }) {
           券商研报
           {items.length > 0 && (
             <span className="text-xs text-gray-400 font-normal">
-              · 近 30 天 {items.length} 篇
+              · 最近 {items.length} 篇
             </span>
           )}
         </h2>
@@ -97,6 +97,9 @@ export function ResearchPanel({ code }: { code: string }) {
                 <th className="text-left font-normal py-1.5 px-2 w-28">机构</th>
                 <th className="text-left font-normal py-1.5 px-2 w-16">评级</th>
                 <th className="text-left font-normal py-1.5 px-2">报告标题</th>
+                <th className="text-right font-normal py-1.5 px-2 whitespace-nowrap">
+                  目标价
+                </th>
                 <th
                   className="text-right font-normal py-1.5 px-2 whitespace-nowrap"
                   colSpan={3}
@@ -156,6 +159,9 @@ export function ResearchPanel({ code }: { code: string }) {
                       ) : (
                         cleanTitle
                       )}
+                    </td>
+                    <td className="py-1.5 px-2 text-right text-gray-800 tabular-nums font-medium">
+                      {r.target_price == null ? "—" : `¥${fmt(r.target_price)}`}
                     </td>
                     <td className="py-1.5 px-1 text-right text-gray-700 tabular-nums">
                       {fmt(r.eps_y1)}

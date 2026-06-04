@@ -1,6 +1,6 @@
 """华尔街见闻爬虫"""
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -37,7 +37,7 @@ class WsjCrawler(BaseCrawler):
                     continue
 
                 ts = item.get("display_time") or item.get("created_at")
-                published_at = datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+                published_at = datetime.fromtimestamp(ts, tz=UTC) if ts else None
 
                 results.append(self._normalize(
                     title=title,

@@ -734,7 +734,7 @@ class AKShareFetcher:
         with _no_proxy():
             try:
                 # AKShare 提供 stock_hsgt_hold_stock_em：北上累计持股（按日期、个股）
-                df = ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
+                ak.stock_hsgt_hold_stock_em(market="北向", indicator="今日排行")
                 # 这个接口是当日横截面，按日期序列要用 stock_hsgt_hist_em
                 df_hist = ak.stock_hsgt_hist_em(symbol=code)
             except Exception as e:

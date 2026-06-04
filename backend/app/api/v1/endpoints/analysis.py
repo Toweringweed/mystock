@@ -3,9 +3,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.schemas.analysis import (
-    ReportRead, FundamentalRead, ChipRead, ChipHistoryItem, DivergenceRead,
-    ForecastUpdate, RecommendationUpdate, PersonalNoteUpdate, ClaudeScoreInput,
+    ChipHistoryItem,
+    ChipRead,
+    ClaudeScoreInput,
+    DivergenceRead,
+    ForecastUpdate,
+    FundamentalRead,
+    PersonalNoteUpdate,
     QuarterlyFinancialItem,
+    RecommendationUpdate,
+    ReportRead,
 )
 
 router = APIRouter()
@@ -98,9 +105,11 @@ async def submit_claude_score(
     无需 UNIQUE 约束。
     """
     from datetime import date, datetime
+
     from sqlalchemy import select
-    from app.models.stock import Stock
+
     from app.models.analysis import AnalysisReport
+    from app.models.stock import Stock
 
     result = await db.execute(select(Stock.id).where(Stock.code == code))
     stock_id = result.scalar_one_or_none()
@@ -188,6 +197,7 @@ async def get_chip_history(
 ):
     """获取近 N 日筹码集中度历史"""
     from sqlalchemy import select
+
     from app.models.analysis import ChipDistribution
     from app.models.stock import Stock
 
@@ -242,6 +252,7 @@ async def update_forecast(
     """手动更新某年净利润预测（亿元），以 source='manual' 写入"""
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.fundamental import ProfitForecast
     from app.models.stock import Stock
 
@@ -272,6 +283,7 @@ async def update_forecast(
 async def get_recommendation(code: str, db: AsyncSession = Depends(get_db)):
     """获取操作建议"""
     from sqlalchemy import select
+
     from app.models.stock import Stock
     from app.models.stock_meta import StockNote
 
@@ -296,6 +308,7 @@ async def update_recommendation(
     """更新操作建议"""
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.stock import Stock
     from app.models.stock_meta import StockNote
 
@@ -324,6 +337,7 @@ async def update_personal_note(
     """更新个人笔记"""
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.stock import Stock
     from app.models.stock_meta import StockNote
 
@@ -360,9 +374,10 @@ async def get_quarterly_financials(
     本端点返回的额外 single_quarter_* + *_qoq 字段由后端按上述规则计算。
     多取 5 期以保证最早一期 QoQ 也有上一季单季可比基准。
     """
-    from sqlalchemy import select, asc
-    from app.models.stock import Stock
+    from sqlalchemy import asc, select
+
     from app.models.backtest_infra import QuarterlyFinancialsHistory
+    from app.models.stock import Stock
 
     res = await db.execute(select(Stock.id).where(Stock.code == code))
     stock_id = res.scalar_one_or_none()

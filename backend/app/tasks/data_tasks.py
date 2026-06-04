@@ -1,6 +1,7 @@
 """数据采集相关 Celery 任务"""
 import asyncio
 import logging
+from datetime import UTC
 
 from app.tasks.celery_app import celery_app
 
@@ -11,15 +12,16 @@ logger = logging.getLogger(__name__)
 def backfill_stock_data(self, stock_code: str, market: str = "A", days: int = 200):
     """新增自选股时回填历史数据（K线 + 技术指标 + 财务），完成后触发 AI 报告"""
     async def _run():
+        from sqlalchemy import select
+
         from app.core.database import AsyncSessionLocal
         from app.models.stock import Stock
-        from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
-        from app.services.kline_service import save_klines, update_volume_ratios
-        from app.services.fundamental_service import save_fundamental
-        from app.services.stock_service import mark_data_ready, mark_sync_running
         from app.services.analysis.technical_analyzer import TechnicalAnalyzer
+        from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
+        from app.services.fundamental_service import save_fundamental
+        from app.services.kline_service import save_klines, update_volume_ratios
+        from app.services.stock_service import mark_data_ready, mark_sync_running
         from app.tasks.analysis_tasks import generate_report_task
-        from sqlalchemy import select
 
         async with AsyncSessionLocal() as db:
             fetcher = AKShareFetcher()
@@ -93,13 +95,15 @@ def backfill_stock_data(self, stock_code: str, market: str = "A", days: int = 20
     try:
         asyncio.run(_run())
     except Exception as exc:
+        exc_message = str(exc)
+
         async def _mark_failed():
             from app.core.database import AsyncSessionLocal
             from app.services.stock_service import mark_sync_failed
 
             async with AsyncSessionLocal() as db:
                 task_id = getattr(self.request, "id", None)
-                await mark_sync_failed(db, stock_code, str(exc), task_id)
+                await mark_sync_failed(db, stock_code, exc_message, task_id)
                 await db.commit()
 
         try:
@@ -115,7 +119,8 @@ def repair_watchlist_sync_gaps(limit: int = 20):
     """自愈扫描：发现自选股缺数据、同步卡住或失败时自动重新回填。"""
 
     async def _run():
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
+
         from sqlalchemy import func, select
 
         from app.core.database import AsyncSessionLocal
@@ -123,7 +128,7 @@ def repair_watchlist_sync_gaps(limit: int = 20):
         from app.models.stock import Stock
         from app.services.stock_service import mark_sync_pending, trigger_backfill
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stale_pending_cutoff = now - timedelta(minutes=10)
         stale_running_cutoff = now - timedelta(minutes=20)
 
@@ -192,6 +197,7 @@ def sync_universe_basic_data(self, days: int = 120, max_stocks: int | None = Non
 
 async def _sync_universe_run(days: int = 120, max_stocks: int | None = None):
     import time
+
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -282,8 +288,8 @@ def update_realtime_quotes(force: bool = False):
     async def _run():
         from app.core.database import AsyncSessionLocal
         from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
-        from app.services.stock_service import get_all_watchlist_codes
         from app.services.quote_cache import update_quote_cache
+        from app.services.stock_service import get_all_watchlist_codes
 
         if not force and not _is_quote_refresh_window():
             return
@@ -323,8 +329,10 @@ def refresh_watchlist_data(days: int = 260, force: bool = False):
         from app.core.database import AsyncSessionLocal
         from app.models.kline import StockDailyKline
         from app.models.stock import Stock
+        from app.services.ai_analyzer.forecast_generator import (
+            update_profit_forecasts as update_forecasts,
+        )
         from app.services.analysis.technical_analyzer import TechnicalAnalyzer
-        from app.services.ai_analyzer.forecast_generator import update_profit_forecasts as update_forecasts
         from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
         from app.services.fundamental_service import save_fundamental, save_quarterly_fundamentals
         from app.services.kline_service import save_klines, update_volume_ratios
@@ -478,8 +486,8 @@ def update_all_fundamentals():
     async def _run():
         from app.core.database import AsyncSessionLocal
         from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
-        from app.services.stock_service import get_all_watchlist_codes_with_info
         from app.services.fundamental_service import save_fundamental, save_quarterly_fundamentals
+        from app.services.stock_service import get_all_watchlist_codes_with_info
 
         async with AsyncSessionLocal() as db:
             stocks = await get_all_watchlist_codes_with_info(db)
@@ -540,6 +548,7 @@ def update_capital_flows():
     """每日 17:00：拉取所有自选股北上资金日度，写 stock_capital_flows"""
     async def _run():
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from app.core.database import AsyncSessionLocal
         from app.models.capital_flow import StockCapitalFlow
         from app.services.data_fetcher.akshare_fetcher import AKShareFetcher
@@ -585,8 +594,10 @@ def update_lhb():
     """每日 17:00：拉取当日龙虎榜（只保留自选股入榜）"""
     async def _run():
         from datetime import date
+
         from sqlalchemy import select
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from app.core.database import AsyncSessionLocal
         from app.models.lhb import StockLhb
         from app.models.stock import Stock
@@ -634,6 +645,7 @@ def sync_calendar_events():
     async def _run():
         from sqlalchemy import select
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from app.core.database import AsyncSessionLocal
         from app.models.calendar_event import CalendarEvent
         from app.models.stock import Stock
@@ -703,8 +715,8 @@ def update_profit_forecasts():
     """对所有自选股刷新盈利预测(优先同花顺真实数据,降级 LLM)"""
     async def _run():
         from app.core.database import AsyncSessionLocal
-        from app.services.stock_service import get_all_watchlist_codes
         from app.services.ai_analyzer.forecast_generator import update_profit_forecasts as upd
+        from app.services.stock_service import get_all_watchlist_codes
 
         async with AsyncSessionLocal() as db:
             codes = await get_all_watchlist_codes(db)
@@ -729,8 +741,8 @@ def update_industry_metrics():
     """每月 1 日：抓 NVDA + 4 大 CSP 最新 10-Q，AI 提取数据中心/Capex 关键指标"""
     async def _run():
         from app.core.database import AsyncSessionLocal
-        from app.services.data_fetcher import industry_report_fetcher as irf
         from app.services.ai_analyzer import industry_metrics_extractor as ime
+        from app.services.data_fetcher import industry_report_fetcher as irf
 
         async with AsyncSessionLocal() as db:
             total = 0
@@ -763,6 +775,7 @@ def update_industry_metrics():
 def _is_quote_refresh_window() -> bool:
     """判断当前是否在 A 股报价刷新窗口（9:00-15:30，工作日）"""
     from datetime import datetime
+
     import pytz
 
     tz = pytz.timezone("Asia/Shanghai")

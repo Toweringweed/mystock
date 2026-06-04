@@ -9,6 +9,7 @@ from app.models.analysis import AnalysisReport
 from app.models.calendar_event import CalendarEvent
 from app.models.earnings_surprise import EarningsSurprise
 from app.models.fundamental import ProfitForecast, StockFundamental
+from app.models.kline import StockDailyKline
 from app.models.stock import Stock
 from app.models.stock_meta import StockNote
 from app.models.target_price_realtime import StockTargetPriceRealtime
@@ -21,15 +22,15 @@ async def get_watchlist_table(db: AsyncSession) -> list[WatchlistTableRow]:
     """聚合自选股表格所需的全部数据，每股一行"""
     # 1. 获取自选股列表
     result = await db.execute(
-        select(Stock).where(Stock.is_watchlist == True).order_by(Stock.id)
+        select(Stock).where(Stock.is_watchlist).order_by(Stock.id)
     )
     stocks = list(result.scalars().all())
     if not stocks:
         return []
 
     stock_ids = [s.id for s in stocks]
-    code_to_stock = {s.code: s for s in stocks}
-    id_to_stock = {s.id: s for s in stocks}
+    {s.code: s for s in stocks}
+    {s.id: s for s in stocks}
 
     # 2. 批量查询最新基本面（TTM）
     fund_result = await db.execute(
@@ -135,6 +136,29 @@ async def get_watchlist_table(db: AsyncSession) -> list[WatchlistTableRow]:
         quotes = await get_quotes(codes)
     except Exception:
         pass
+
+    # Redis 行情缺失时的兜底价格/YTD：批量读取今年 K 线，避免每只股票循环查询。
+    year_start = date(today.year, 1, 1)
+    kline_result = await db.execute(
+        select(
+            StockDailyKline.stock_id,
+            StockDailyKline.trade_date,
+            StockDailyKline.close,
+        )
+        .where(
+            StockDailyKline.stock_id.in_(stock_ids),
+            StockDailyKline.trade_date >= year_start,
+        )
+        .order_by(StockDailyKline.stock_id, StockDailyKline.trade_date.asc())
+    )
+    first_close_by_stock: dict[int, float] = {}
+    last_close_by_stock: dict[int, float] = {}
+    for stock_id, _trade_date, close in kline_result.all():
+        if close is None:
+            continue
+        close_f = float(close)
+        first_close_by_stock.setdefault(stock_id, close_f)
+        last_close_by_stock[stock_id] = close_f
 
     # 7. 组装行数据
     rows: list[WatchlistTableRow] = []
@@ -259,23 +283,12 @@ async def get_watchlist_table(db: AsyncSession) -> list[WatchlistTableRow]:
 
         # 若 Redis 无行情，从 K 线取价格和年初涨幅
         if current_price is None or ytd_change is None:
-            try:
-                import pandas as pd
-                from app.services.kline_service import get_kline_dataframe
-                klines = await get_kline_dataframe(db, stock.code, days=260)
-                if not klines.empty:
-                    last_close = float(klines["close"].iloc[-1])
-                    if current_price is None:
-                        current_price = last_close
-                    if ytd_change is None:
-                        year_start = str(date.today().year)
-                        ytd_klines = klines[klines.index >= pd.Timestamp(f"{year_start}-01-01")]
-                        if not ytd_klines.empty:
-                            first_close = float(ytd_klines["close"].iloc[0])
-                            if first_close:
-                                ytd_change = round((last_close / first_close - 1) * 100, 2)
-            except Exception:
-                pass
+            last_close = last_close_by_stock.get(sid)
+            first_close = first_close_by_stock.get(sid)
+            if current_price is None and last_close is not None:
+                current_price = last_close
+            if ytd_change is None and last_close is not None and first_close:
+                ytd_change = round((last_close / first_close - 1) * 100, 2)
 
         rows.append(
             WatchlistTableRow(

@@ -8,6 +8,7 @@ export interface ResearchReportRead {
   published_at: string | null;
   pdf_url: string | null;
   forecast_year_base: number | null;
+  target_price: number | null;
   eps_y1: number | null;
   eps_y2: number | null;
   eps_y3: number | null;

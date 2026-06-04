@@ -96,7 +96,7 @@ def _detect_divergence(
 
 async def calc_and_save_divergence(db: AsyncSession, code: str) -> list[DivergenceSignal]:
     """计算并保存背离信号"""
-    from app.services.kline_service import get_kline_dataframe, get_indicators
+    from app.services.kline_service import get_indicators, get_kline_dataframe
 
     df = await get_kline_dataframe(db, code, days=LOOKBACK + 10)
     indicators = await get_indicators(db, code, days=LOOKBACK + 10)
@@ -104,7 +104,7 @@ async def calc_and_save_divergence(db: AsyncSession, code: str) -> list[Divergen
     if df.empty or len(indicators) < 20:
         return []
 
-    prices = df["close"].values
+    df["close"].values
     dates = list(df.index.date)
 
     # 对齐 indicators 与 prices（按日期）

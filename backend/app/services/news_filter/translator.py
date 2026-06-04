@@ -19,7 +19,6 @@ import hashlib
 import json
 import logging
 import re
-from typing import Optional
 
 from app.core.config import settings as app_settings
 from app.services.ai_analyzer.llm_client import call_llm
@@ -53,11 +52,11 @@ def detect_lang(text: str) -> str:
 
 
 def _cache_key(title: str, summary: str) -> str:
-    h = hashlib.sha1(f"{title}|||{summary}".encode("utf-8")).hexdigest()[:16]
+    h = hashlib.sha1(f"{title}|||{summary}".encode()).hexdigest()[:16]
     return f"news:tr:{h}"
 
 
-async def _redis_get(key: str) -> Optional[str]:
+async def _redis_get(key: str) -> str | None:
     try:
         from redis.asyncio import Redis
         client = Redis.from_url(app_settings.redis_url, decode_responses=True)

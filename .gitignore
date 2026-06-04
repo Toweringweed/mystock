@@ -221,3 +221,16 @@ logs/
 *.dump
 *.sql.gz
 backup.sql
+
+# GitHub release hygiene
+/.agents/
+/.claude/
+/.codex-tmp/
+/*-claude-score*.json
+/*_payload.json
+/*_research_entries.json
+/*_research_updates.json
+/*_score_*.json
+/import_*_research.ps1
+frontend/next-*.log
+frontend/.corepack/

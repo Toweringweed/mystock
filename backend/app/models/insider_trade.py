@@ -1,8 +1,15 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Date, DateTime, Enum, ForeignKey, Integer, Numeric,
-    String, UniqueConstraint, func,
+    BigInteger,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

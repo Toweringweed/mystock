@@ -128,6 +128,7 @@ async def dispatch_event(db: AsyncSession, event) -> bool:
     `event` 接受 StockEvent ORM 对象或 event_id（int）。传 ORM 对象可避免一次重查。
     """
     from sqlalchemy import update
+
     from app.models.event import StockEvent
     from app.services.notifier.event_templates import format_event
 
@@ -185,6 +186,7 @@ async def dispatch_event(db: AsyncSession, event) -> bool:
 async def flush_event_queue(db: AsyncSession) -> int:
     """整点：把 Redis 中堆积的 medium 事件聚合推送"""
     from sqlalchemy import update
+
     from app.models.event import StockEvent
     from app.services.notifier.event_templates import format_aggregated
 

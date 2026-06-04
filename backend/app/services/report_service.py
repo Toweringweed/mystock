@@ -1,5 +1,4 @@
 """AI 分析报告查询服务"""
-from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

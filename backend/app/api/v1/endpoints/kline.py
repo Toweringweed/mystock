@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas.kline import KlineRead, IndicatorRead
+from app.schemas.kline import IndicatorRead, KlineRead
 
 router = APIRouter()
 
@@ -35,8 +35,9 @@ async def recalc_indicators(
     db: AsyncSession = Depends(get_db),
 ):
     """手动触发：补齐最新 K 线 + 重算技术指标（用于数据缺失时修复）"""
-    from app.models.stock import Stock
     from sqlalchemy import select
+
+    from app.models.stock import Stock
 
     result = await db.execute(select(Stock).where(Stock.code == code))
     stock = result.scalar_one_or_none()

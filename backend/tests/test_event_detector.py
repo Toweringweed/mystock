@@ -58,7 +58,8 @@ def test_event_helper_imports():
 
 def test_summary_generator_imports():
     from app.services.ai_analyzer.summary_generator import (
-        BATCH_SIZE, SummaryGenerator, _format_snapshots, _parse_response, StockSnapshot,
+        BATCH_SIZE,
+        SummaryGenerator,
     )
     assert BATCH_SIZE == 10
     assert callable(SummaryGenerator)

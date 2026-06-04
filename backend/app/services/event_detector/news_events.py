@@ -4,7 +4,7 @@
 stock_events 表，是为了让 daily_summary 的"近 7 天事件"上下文与 MCP 视图能统一感知。
 """
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,7 @@ async def detect_all(db: AsyncSession, target_date: date | None = None) -> int:
     cutoff = datetime.combine(
         target - timedelta(days=LOOKBACK_DAYS),
         datetime.min.time(),
-        tzinfo=timezone.utc,
+        tzinfo=UTC,
     )
 
     rows = await db.execute(

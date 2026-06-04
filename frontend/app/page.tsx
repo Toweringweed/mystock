@@ -5,7 +5,7 @@ import { SearchBar } from "@/components/stock/SearchBar";
 export default function HomePage() {
   return (
     <main className="min-h-screen">
-      <header className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900 tracking-tight">MyStock</h1>
         <div className="flex items-center gap-4">
           <SearchBarWrapper />
@@ -24,11 +24,11 @@ export default function HomePage() {
         </div>
       </header>
 
-      <div className="flex h-[calc(100vh-57px)]">
-        <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex h-[calc(100vh-49px)]">
+        <div className="flex-1 overflow-y-auto p-4">
           <WatchlistWithTagFilter />
         </div>
-        <aside className="w-80 border-l border-gray-200 overflow-y-auto p-4">
+        <aside className="w-72 border-l border-gray-200 overflow-y-auto p-3">
           <h2 className="text-sm font-semibold text-gray-600 mb-3">最新资讯</h2>
           <NewsFeed />
         </aside>

@@ -4,6 +4,7 @@
 """
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -11,10 +12,10 @@ from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from types import SimpleNamespace
-
 from app.models.backtest_infra import (
-    BacktestSnapshot, InstitutionMetadata, QuarterlyFinancialsHistory, StockDailyFactor,
+    BacktestSnapshot,
+    InstitutionMetadata,
+    StockDailyFactor,
 )
 from app.models.estimate_revision import EstimateRevision
 from app.models.fundamental import ProfitForecast
@@ -131,7 +132,7 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
 
     # 去重: 同 (institution, report_date) 仅保留 1 条 — AKShare 与 web_search 经常对同一研报
     # 因 title 不同导致 content_hash 不同, 下游显示重复, 这里清理。优先目标价更新的(eps_y1*pe_y1 推算最大者)。
-    _dedup_map: dict[tuple[str, "date"], object] = {}
+    _dedup_map: dict[tuple[str, date], object] = {}
     for r in all_reports_90d:
         key = (r.institution, r.report_date)
         prev = _dedup_map.get(key)
@@ -150,11 +151,27 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         # 没有任何机构覆盖 — 诚实标注
         await _upsert_realtime(db, stock_id, {
             "current_price": Decimal(str(current_price)),
+            "avg_target_simple": None,
+            "avg_target_weighted": None,
+            "highest_target": None,
+            "lowest_target": None,
+            "target_dispersion_cv": None,
+            "upside_pct": None,
+            "base_score": None,
+            "final_score": None,
+            "has_consensus": False,
+            "bonus_consensus_pct": Decimal("0.00"),
+            "upgrade_count_30d": 0,
+            "bonus_revisions_pct": Decimal("0.00"),
+            "total_bonus_pct": Decimal("0.00"),
+            "days_since_latest": None,
             "freshness_status": "none",
             "freshness_factor": Decimal("0.00"),
             "research_count_30d": 0,
             "research_count_90d": 0,
             "veto_triggered": False,
+            "veto_reason": None,
+            "institution_breakdown": {"items": [], "reason": "no_research_coverage"},
         })
         return {
             "stock_id": stock_id,
@@ -182,7 +199,11 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         for row in res.all()
     }
 
-    # 4) 提取每条研报的目标价(优先 target_price_a,fallback eps_y1 × pe_y1)
+    # 4) 提取每条研报的目标价
+    #
+    # Do not derive target price from EPS × PE. In sell-side forecast tables,
+    # PE is usually calculated from the report-date stock price, so EPS × PE
+    # reconstructs the then-current price rather than an analyst target.
     breakdown_items = []
     target_prices_simple = []
     target_prices_weighted_num = 0.0
@@ -193,14 +214,10 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         derived = False
         if r.target_price_a is not None:
             tp = float(r.target_price_a)
-        elif r.eps_y1 is not None and r.pe_y1 is not None:
-            try:
-                tp_calc = float(r.eps_y1) * float(r.pe_y1)
-                if tp_calc > 0:
-                    tp = tp_calc
-                    derived = True
-            except Exception:
-                pass
+        elif r.eps_y1 is not None and r.pe_y1 is not None and float(r.pe_y1) <= 1.5:
+            # Manual target-price entries are stored as a fake EPS/PE pair:
+            # eps_y1 = target_price, pe_y1 = 1.0. Keep those as explicit.
+            tp = float(r.eps_y1)
         if tp is None or tp <= 0:
             continue
 
@@ -237,11 +254,27 @@ async def compute_realtime_for_stock(db: AsyncSession, stock_id: int) -> dict[st
         # 有研报但都无法解析目标价
         await _upsert_realtime(db, stock_id, {
             "current_price": Decimal(str(current_price)),
+            "avg_target_simple": None,
+            "avg_target_weighted": None,
+            "highest_target": None,
+            "lowest_target": None,
+            "target_dispersion_cv": None,
+            "upside_pct": None,
+            "base_score": None,
+            "final_score": None,
+            "has_consensus": False,
+            "bonus_consensus_pct": Decimal("0.00"),
+            "upgrade_count_30d": 0,
+            "bonus_revisions_pct": Decimal("0.00"),
+            "total_bonus_pct": Decimal("0.00"),
+            "days_since_latest": None,
             "freshness_status": "none",
             "freshness_factor": Decimal("0.00"),
             "research_count_30d": len(reports_30d),
             "research_count_90d": len(all_reports_90d),
             "veto_triggered": False,
+            "veto_reason": None,
+            "institution_breakdown": {"items": [], "reason": "no_explicit_target_price"},
         })
         return {
             "stock_id": stock_id,
@@ -458,7 +491,7 @@ async def _upsert_realtime(db: AsyncSession, stock_id: int, payload: dict):
 
 async def compute_realtime_for_all_watchlist(db: AsyncSession) -> dict[str, int]:
     """对所有自选股算实时上行空间。返回统计数据。"""
-    res = await db.execute(select(Stock).where(Stock.is_watchlist == True))
+    res = await db.execute(select(Stock).where(Stock.is_watchlist))
     stocks = list(res.scalars().all())
 
     stats = {"total": len(stocks), "computed": 0, "no_target": 0, "veto": 0}

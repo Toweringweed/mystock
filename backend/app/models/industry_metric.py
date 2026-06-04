@@ -1,7 +1,13 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    DateTime, Integer, Numeric, String, Text, UniqueConstraint, func,
+    DateTime,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 

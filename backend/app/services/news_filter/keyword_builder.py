@@ -137,6 +137,7 @@ async def get_keywords_cached(db: AsyncSession) -> dict[int, list[KeywordEntry]]
     """优先从 Redis 取，缓存未命中则重建"""
     try:
         from redis.asyncio import Redis
+
         from app.core.config import settings as app_settings
 
         redis = Redis.from_url(app_settings.redis_url, decode_responses=True)
@@ -161,6 +162,7 @@ async def get_keywords_cached(db: AsyncSession) -> dict[int, list[KeywordEntry]]
 async def _save_cache(keywords: dict[int, list[KeywordEntry]]) -> None:
     try:
         from redis.asyncio import Redis
+
         from app.core.config import settings as app_settings
 
         redis = Redis.from_url(app_settings.redis_url, decode_responses=True)
@@ -180,6 +182,7 @@ async def invalidate_cache() -> None:
     """自选股变更时调用"""
     try:
         from redis.asyncio import Redis
+
         from app.core.config import settings as app_settings
 
         redis = Redis.from_url(app_settings.redis_url, decode_responses=True)

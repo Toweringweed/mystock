@@ -9,7 +9,6 @@ from app.models.research import ResearchReportMeta
 from app.models.stock import Stock
 from app.schemas.research import GlobalResearchReportRead, ResearchReportRead
 
-
 _PLACEHOLDER_PREFIX = "["  # "[PDF 下载失败]" 等占位
 _PLACEHOLDER_MAX_LEN = 60
 
@@ -33,6 +32,18 @@ def _meta_to_read(
     summary: str | None = None,
     content: str | None = None,
 ) -> ResearchReportRead:
+    target_price = None
+    eps_y1 = float(meta.eps_y1) if meta.eps_y1 is not None else None
+    pe_y1 = float(meta.pe_y1) if meta.pe_y1 is not None else None
+
+    # manual-add stores explicit target prices as a fake EPS/PE pair:
+    # eps_y1 = target_price, pe_y1 = 1.0. Expose it as target_price so the
+    # research table does not mislabel the target as EPS.
+    if eps_y1 is not None and pe_y1 is not None and pe_y1 <= 1.5:
+        target_price = eps_y1
+        eps_y1 = None
+        pe_y1 = None
+
     return ResearchReportRead(
         news_id=meta.news_id,
         title=title,
@@ -41,10 +52,11 @@ def _meta_to_read(
         published_at=published_at,
         pdf_url=meta.pdf_url,
         forecast_year_base=meta.forecast_year_base,
-        eps_y1=float(meta.eps_y1) if meta.eps_y1 is not None else None,
+        target_price=target_price,
+        eps_y1=eps_y1,
         eps_y2=float(meta.eps_y2) if meta.eps_y2 is not None else None,
         eps_y3=float(meta.eps_y3) if meta.eps_y3 is not None else None,
-        pe_y1=float(meta.pe_y1) if meta.pe_y1 is not None else None,
+        pe_y1=pe_y1,
         pe_y2=float(meta.pe_y2) if meta.pe_y2 is not None else None,
         pe_y3=float(meta.pe_y3) if meta.pe_y3 is not None else None,
         summary=summary,

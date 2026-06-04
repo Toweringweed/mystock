@@ -1,9 +1,7 @@
 """P1 指标补全单元测试（资金 / 日历 / 减持 / 行业景气）"""
-from datetime import date
 
 from app.services.event_detector import insider_events
 from app.services.notifier.event_templates import format_event
-
 
 # ────────── insider severity 分级 ──────────
 
@@ -109,16 +107,19 @@ def test_calendar_lead_times_config():
 # ────────── 模型字段存在性 ──────────
 
 def test_model_fields_present():
-    from app.models.kline import StockDailyKline
     from app.models.fundamental import StockFundamental
+    from app.models.kline import StockDailyKline
     assert "volume_ratio" in StockDailyKline.__table__.c
     assert "ps" in StockFundamental.__table__.c
 
 
 def test_new_models_importable():
     from app.models import (
-        StockCapitalFlow, StockLhb, InsiderTrade,
-        CalendarEvent, IndustryMetric,
+        CalendarEvent,
+        IndustryMetric,
+        InsiderTrade,
+        StockCapitalFlow,
+        StockLhb,
     )
     assert StockCapitalFlow.__tablename__ == "stock_capital_flows"
     assert StockLhb.__tablename__ == "stock_lhb"

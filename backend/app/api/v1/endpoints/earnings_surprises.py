@@ -13,7 +13,9 @@ from app.models.earnings_surprise import EarningsSurprise
 from app.models.kline import StockDailyKline
 from app.models.stock import Stock
 from app.schemas.earnings_surprise import (
-    EarningsSurpriseInput, EarningsSurpriseRead, UpcomingEarningsItem,
+    EarningsSurpriseInput,
+    EarningsSurpriseRead,
+    UpcomingEarningsItem,
 )
 
 router = APIRouter()

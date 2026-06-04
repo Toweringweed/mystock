@@ -9,9 +9,6 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings as app_settings
-from app.services.settings_service import get_effective_value
-
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 10

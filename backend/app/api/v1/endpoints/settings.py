@@ -1,5 +1,6 @@
 """应用设置 API"""
 import logging
+from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -80,8 +81,8 @@ async def update_setting(payload: SettingUpdate, db: AsyncSession = Depends(get_
 @router.post("/test-llm")
 async def test_llm(db: AsyncSession = Depends(get_db)):
     """测试 LLM 连通性，返回可用的 provider"""
-    from app.services.settings_service import get_effective_value
     from app.core.config import settings as cfg
+    from app.services.settings_service import get_effective_value
 
     results = {}
 
@@ -164,7 +165,8 @@ async def trigger_task(payload: TriggerTaskRequest):
 @router.post("/test-notify")
 async def test_notify(db: AsyncSession = Depends(get_db)):
     """发送一条测试推送到企业微信，验证 webhook 配置。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from app.services.notifier import wechat_work_notifier
     from app.services.notifier.event_templates import format_event
     from app.services.settings_service import get_effective_value
@@ -176,7 +178,7 @@ async def test_notify(db: AsyncSession = Depends(get_db)):
     card = format_event(
         event_type="VOLUME_SPIKE",
         severity="medium",
-        title=f"测试推送 · {datetime.now(tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+        title=f"测试推送 · {datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M UTC')}",
         payload={
             "volume": 123456,
             "avg_20": 30000,
@@ -309,8 +311,8 @@ async def data_status(db: AsyncSession = Depends(get_db)):
          "hint": "NVDA 数据中心/4 大 CSP capex"},
     ]
 
-    from datetime import datetime, timezone
-    now = datetime.now(tz=timezone.utc)
+    from datetime import datetime
+    now = datetime.now(tz=UTC)
 
     out = []
     for q in queries:
@@ -328,7 +330,7 @@ async def data_status(db: AsyncSession = Depends(get_db)):
             try:
                 lt = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
                 if lt.tzinfo is None:
-                    lt = lt.replace(tzinfo=timezone.utc)
+                    lt = lt.replace(tzinfo=UTC)
                 stale_hours = round((now - lt).total_seconds() / 3600, 1)
             except Exception:
                 pass

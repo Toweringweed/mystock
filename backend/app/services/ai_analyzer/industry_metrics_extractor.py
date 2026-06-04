@@ -7,12 +7,10 @@ import json
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings as app_settings
 from app.models.industry_metric import IndustryMetric
-from app.services.settings_service import get_effective_value
 
 logger = logging.getLogger(__name__)
 

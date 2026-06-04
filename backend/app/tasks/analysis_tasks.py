@@ -1,7 +1,7 @@
 """技术分析 + AI 报告 Celery 任务"""
 import asyncio
 import logging
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 
 from sqlalchemy import select
 
@@ -15,9 +15,9 @@ def calc_all_indicators():
     """每日收盘后批量计算所有自选股技术指标 + 量比"""
     async def _run():
         from app.core.database import AsyncSessionLocal
-        from app.services.stock_service import get_all_watchlist_codes
         from app.services.analysis.technical_analyzer import TechnicalAnalyzer
         from app.services.kline_service import update_volume_ratios
+        from app.services.stock_service import get_all_watchlist_codes
 
         async with AsyncSessionLocal() as db:
             codes = await get_all_watchlist_codes(db)
@@ -41,15 +41,15 @@ def run_event_detection():
     """每日 16:15：技术 + 估值 + 资讯 三类事件检测，写 stock_events，立即推送 high"""
     async def _run():
         from app.core.database import AsyncSessionLocal
+        from app.models.event import StockEvent
         from app.services.event_detector.detector import run_daily_detection
         from app.services.notifier import dispatcher
-        from app.models.event import StockEvent
 
         async with AsyncSessionLocal() as db:
             counts = await run_daily_detection(db)
             logger.info(f"[run_event_detection] 完成: {counts}")
 
-            cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=2)
+            cutoff = datetime.now(tz=UTC) - timedelta(hours=2)
             row = await db.execute(
                 select(StockEvent)
                 .where(StockEvent.severity == "high")
@@ -71,10 +71,10 @@ def generate_daily_summaries():
     """每日 16:30：L1 Haiku 批量生成所有自选股 daily_summary，尾部检测 signal_flip"""
     async def _run():
         from app.core.database import AsyncSessionLocal
+        from app.models.event import StockEvent
         from app.services.ai_analyzer.summary_generator import SummaryGenerator
         from app.services.event_detector.detector import detect_signal_flip
         from app.services.notifier import dispatcher
-        from app.models.event import StockEvent
 
         async with AsyncSessionLocal() as db:
             generator = SummaryGenerator()
@@ -84,7 +84,7 @@ def generate_daily_summaries():
             flips = await detect_signal_flip(db)
 
             if flips:
-                cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+                cutoff = datetime.now(tz=UTC) - timedelta(hours=1)
                 row = await db.execute(
                     select(StockEvent)
                     .where(StockEvent.event_type == "AI_SIGNAL_FLIP")
@@ -111,7 +111,7 @@ def generate_reports_for_events():
         from app.models.stock import Stock
 
         async with AsyncSessionLocal() as db:
-            today_start = datetime.combine(date.today(), time.min, tzinfo=timezone.utc)
+            today_start = datetime.combine(date.today(), time.min, tzinfo=UTC)
             row = await db.execute(
                 select(Stock.code).distinct()
                 .join(StockEvent, StockEvent.stock_id == Stock.id)

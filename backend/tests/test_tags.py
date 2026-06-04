@@ -2,7 +2,6 @@
 from app.services.ai_analyzer.tags_extractor import TagsExtractor
 from app.services.tags_service import VALID_CATEGORIES
 
-
 # ────────── extractor _parse 容错 ──────────
 
 def test_parse_valid_json():
@@ -87,13 +86,13 @@ def test_valid_categories_set():
 # ────────── 模型/Schema 可导入 ──────────
 
 def test_models_importable():
-    from app.models.tag import Tag, StockTag
+    from app.models.tag import StockTag, Tag
     assert Tag.__tablename__ == "tags"
     assert StockTag.__tablename__ == "stock_tags"
 
 
 def test_schemas_importable():
-    from app.schemas.tags import TagRead, StockTagRead, StockTagAttach
+    from app.schemas.tags import StockTagAttach
 
     payload = StockTagAttach(name="测试", category="theme")
     assert payload.name == "测试"

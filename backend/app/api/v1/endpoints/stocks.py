@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.schemas.stock import StockCoreUpdate, StockCreate, StockRead, StockSearch
 from app.schemas.analysis import WatchlistTableRow
+from app.schemas.stock import StockCoreUpdate, StockCreate, StockRead, StockSearch
 
 router = APIRouter()
 
@@ -21,8 +21,8 @@ async def search_stocks(
     db: AsyncSession = Depends(get_db),
 ):
     """搜索 A股/港股（查本地缓存，毫秒级响应）"""
-    from app.services.stock_universe_service import search_universe, get_universe_count
     from app.services.data_fetcher.akshare_fetcher import search_stocks as _search_online
+    from app.services.stock_universe_service import get_universe_count, search_universe
 
     # 若本地库还没数据（首次启动尚未同步完成），降级到在线搜索
     count = await get_universe_count(db)
@@ -47,6 +47,8 @@ async def add_to_watchlist(
     """添加自选股，触发数据回填任务"""
     from app.services.stock_service import (
         add_to_watchlist as _add,
+    )
+    from app.services.stock_service import (
         mark_sync_failed,
         mark_sync_pending,
         trigger_backfill,

@@ -1,3 +1,4 @@
+from datetime import UTC
 from types import SimpleNamespace
 
 import pytest
@@ -93,7 +94,7 @@ def test_backfill_and_repair_tasks_route_to_data_queue():
 
 
 def test_stock_read_exposes_sync_status_fields():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from app.schemas.stock import StockRead
 
@@ -110,8 +111,8 @@ def test_stock_read_exposes_sync_status_fields():
         sync_error=None,
         sync_started_at=None,
         sync_completed_at=None,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
     assert row.sync_status == "pending"

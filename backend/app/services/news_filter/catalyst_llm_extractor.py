@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Optional
 
 from app.services.ai_analyzer.llm_client import call_llm
 from app.services.news_filter.catalyst_extractor import CATALYST_LABELS_ZH
@@ -46,7 +45,7 @@ async def extract_catalyst_and_risks(
     content: str | None = None,
     summary: str | None = None,
     catalyst_type: str = "other",
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
     """返回 (catalyst_summary, key_risks);任何失败均返回 (None, None)。"""
     if not title:
         return None, None

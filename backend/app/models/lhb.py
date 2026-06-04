@@ -1,8 +1,14 @@
 from datetime import date, datetime
 
 from sqlalchemy import (
-    BigInteger, Date, DateTime, ForeignKey, Integer, Numeric,
-    String, Text, UniqueConstraint, func,
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship

@@ -1,6 +1,5 @@
 """技术指标计算引擎（pandas-ta）"""
 import logging
-from datetime import date
 
 import pandas as pd
 import pandas_ta as ta
@@ -13,9 +12,9 @@ class TechnicalAnalyzer:
     """基于 pandas-ta 计算技术指标，写入数据库"""
 
     async def calc_and_save(self, db: AsyncSession, code: str) -> int:
-        from app.services.kline_service import get_kline_dataframe, save_indicators
         from app.services.chip_service import calc_and_save_chip
         from app.services.divergence_service import calc_and_save_divergence
+        from app.services.kline_service import get_kline_dataframe, save_indicators
 
         df = await get_kline_dataframe(db, code, days=300)
         if df.empty or len(df) < 30:

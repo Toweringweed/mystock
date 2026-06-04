@@ -58,7 +58,7 @@ async def get_global_supply_chain(db: AsyncSession) -> GlobalSupplyChainResponse
     - 边:relation_type=upstream/downstream,from→to 始终代表"上游→下游"流向
     - 聚簇优先级:industry > theme tag > "未分组"(实际数据中 industry 普遍未填,主要靠 theme tag)
     """
-    from app.models.tag import Tag, StockTag
+    from app.models.tag import StockTag, Tag
 
     # 1) 全部自选股
     res = await db.execute(
@@ -68,7 +68,7 @@ async def get_global_supply_chain(db: AsyncSession) -> GlobalSupplyChainResponse
     watchlist_rows = list(res.all())
     stock_id_to_code = {r.id: r.code for r in watchlist_rows}
     code_to_name = {r.code: (r.name or r.code) for r in watchlist_rows}
-    code_to_market = {r.code: (r.market or "A") for r in watchlist_rows}
+    {r.code: (r.market or "A") for r in watchlist_rows}
 
     watchlist_codes_set = set(stock_id_to_code.values())
 
@@ -189,6 +189,7 @@ class SupplyChainService:
 
     async def extract_and_save(self, db: AsyncSession, code: str) -> list[SupplyChain]:
         from sqlalchemy import delete
+
         from app.services.ai_analyzer.supply_chain_extractor import SupplyChainExtractor
 
         # 获取股票名称

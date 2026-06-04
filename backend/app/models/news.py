@@ -1,8 +1,15 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint,
-    String, Text, func,
+    BigInteger,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship

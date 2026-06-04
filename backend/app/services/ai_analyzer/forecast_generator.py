@@ -12,7 +12,6 @@ write 时:
 import json
 import logging
 
-import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -184,7 +183,8 @@ async def _save_llm_forecasts(db: AsyncSession, stock: Stock) -> tuple[int, list
     fund = fund_row.scalar_one_or_none()
 
     def _v(col: str) -> str:
-        if fund is None: return "N/A"
+        if fund is None:
+            return "N/A"
         v = getattr(fund, col, None)
         return str(round(float(v), 2)) if v is not None else "N/A"
 
@@ -206,7 +206,7 @@ async def _save_llm_forecasts(db: AsyncSession, stock: Stock) -> tuple[int, list
     if f26 is None and f27 is None:
         return 0, []
 
-    latest_close = await _latest_close(db, stock.id)
+    await _latest_close(db, stock.id)
 
     saved_years: list[int] = []
     for year, np_yi in [(2026, f26), (2027, f27)]:
@@ -246,7 +246,8 @@ def _parse(raw: str) -> dict:
     if not raw:
         return {}
     try:
-        s = raw.find("{"); e = raw.rfind("}") + 1
+        s = raw.find("{")
+        e = raw.rfind("}") + 1
         if s >= 0 and e > s:
             return json.loads(raw[s:e])
     except Exception:

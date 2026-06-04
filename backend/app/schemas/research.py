@@ -14,6 +14,7 @@ class ResearchReportRead(BaseModel):
     pdf_url: str | None = None
 
     forecast_year_base: int | None = None
+    target_price: float | None = None
     eps_y1: float | None = None
     eps_y2: float | None = None
     eps_y3: float | None = None

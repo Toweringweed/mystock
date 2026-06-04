@@ -8,13 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.daily_summary import DailySummary
 from app.models.event import StockEvent
 from app.models.fundamental import StockFundamental
 from app.models.kline import StockDailyKline, StockTechnicalIndicator
 from app.models.stock import Stock
-from app.services.settings_service import get_effective_value
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +173,7 @@ class SummaryGenerator:
         stock_ids = [s.id for s in stocks]
 
         # 批量：每只股的最新 indicator
-        ind_rank = (
+        (
             select(
                 StockTechnicalIndicator,
                 select(StockTechnicalIndicator.id)
@@ -187,7 +185,8 @@ class SummaryGenerator:
             )
         )
         # 上面 correlated subquery 写法在 SQLAlchemy 里不好处理，简化：用 distinct on
-        from sqlalchemy import func as sa_func, and_
+        from sqlalchemy import and_
+        from sqlalchemy import func as sa_func
 
         ind_subq = (
             select(

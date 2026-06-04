@@ -10,7 +10,7 @@
 import asyncio
 import hashlib
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.tasks.celery_app import celery_app
 
@@ -60,7 +60,8 @@ async def _process_research_pdfs_run(limit: int = 10):
     from app.models.news import IndustryNews
     from app.services.ai_analyzer.llm_client import call_llm
     from app.services.data_fetcher.pdf_utils import (
-        download_pdf, pdf_to_text_async,
+        download_pdf,
+        pdf_to_text_async,
     )
 
     base_dir = Path("/app/data/research_reports")
@@ -208,8 +209,10 @@ def crawl_all_sources():
 async def _fetch_and_save_research(db, code: str, stock_id: int) -> int:
     """券商研报:AKShare(主) + Claude web_search(增量补充近 7 天) → IndustryNews + ResearchReportMeta + NewsStockRelation"""
     from datetime import timedelta as _timedelta
+
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.news import IndustryNews, NewsStockRelation
     from app.models.research import ResearchReportMeta
     from app.services.news_crawler.research_crawler import ResearchCrawler
@@ -319,10 +322,161 @@ async def _fetch_and_save_research(db, code: str, stock_id: int) -> int:
         await db.execute(meta_stmt)
 
         if result.rowcount:
+            await _maybe_save_pdf_target_price(
+                db,
+                stock_id=stock_id,
+                stock_name=stock_name,
+                news_id=news_id,
+                report_date=item["published_at"] or datetime.now(),
+                broker=meta.get("broker"),
+                rating=meta.get("rating"),
+                forecast_year_base=meta.get("forecast_year_base"),
+                pdf_url=meta.get("pdf_url") or item.get("source_url"),
+            )
             saved += 1
 
     await db.flush()
     return saved
+
+
+def _extract_target_price_from_pdf_text(url: str) -> tuple[float | None, str | None]:
+    """Best-effort parser for explicit sell-side target prices in PDF reports."""
+    import re
+
+    import fitz
+    import requests
+
+    patterns = [
+        re.compile(r"目标价(?:为|至|：|:|上调至|下调至)?([0-9]+(?:\.[0-9]+)?)元"),
+        re.compile(r"目标价格(?:为|至|：|:)?([0-9]+(?:\.[0-9]+)?)元"),
+        re.compile(r"([0-9]+(?:\.[0-9]+)?)元(?:的)?目标价"),
+        re.compile(r"目标价([0-9]+(?:\.[0-9]+)?)"),
+        re.compile(r"目标价格([0-9]+(?:\.[0-9]+)?)"),
+    ]
+    resp = requests.get(url, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+    resp.raise_for_status()
+    doc = fitz.open(stream=resp.content, filetype="pdf")
+    text = "\n".join(page.get_text("text") for page in doc[: min(4, len(doc))])
+    compact = re.sub(r"\s+", "", text)
+    for pattern in patterns:
+        match = pattern.search(compact)
+        if not match:
+            continue
+        value = float(match.group(1))
+        if value < 5 or value > 5000:
+            continue
+        start = max(0, match.start() - 80)
+        end = min(len(compact), match.end() + 80)
+        return value, compact[start:end]
+    return None, None
+
+
+async def _maybe_save_pdf_target_price(
+    db,
+    *,
+    stock_id: int,
+    stock_name: str,
+    news_id: int,
+    report_date: datetime,
+    broker: str | None,
+    rating: str | None,
+    forecast_year_base: int | None,
+    pdf_url: str | None,
+):
+    """Extract explicit PDF target price and store it as a fake EPS/PE target row.
+
+    ResearchReportMeta has no dedicated target_price column; elsewhere in the app
+    explicit target prices are represented as eps_y1=target_price, pe_y1=1.0.
+    """
+    from datetime import datetime as _dt
+    from decimal import Decimal
+
+    from sqlalchemy import and_, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.news import IndustryNews, NewsStockRelation
+    from app.models.research import ResearchReportMeta
+
+    if not pdf_url or ".pdf" not in pdf_url.lower() or not broker:
+        return
+
+    existing = await db.execute(
+        select(ResearchReportMeta.news_id)
+        .join(IndustryNews, IndustryNews.id == ResearchReportMeta.news_id)
+        .where(
+            and_(
+                ResearchReportMeta.stock_id == stock_id,
+                ResearchReportMeta.broker == broker,
+                IndustryNews.published_at >= _dt.combine(report_date.date(), _dt.min.time()),
+                IndustryNews.published_at <= _dt.combine(report_date.date(), _dt.max.time()),
+                ResearchReportMeta.pe_y1 <= Decimal("1.5"),
+            )
+        )
+        .limit(1)
+    )
+    if existing.scalar_one_or_none():
+        return
+
+    try:
+        target, context = await asyncio.to_thread(_extract_target_price_from_pdf_text, pdf_url)
+    except Exception as exc:
+        logger.debug(f"[research_pdf_target] PDF 目标价抽取失败: {pdf_url} {exc}")
+        return
+    if target is None:
+        return
+
+    content_hash = hashlib.sha256(
+        f"pdf-target:{stock_id}:{news_id}:{broker}:{target}".encode()
+    ).hexdigest()
+    target_news_stmt = (
+        pg_insert(IndustryNews)
+        .values(
+            title=f"{broker}：{stock_name} 目标价 {target:g} 元（PDF抽取）",
+            content=context,
+            source="pdf_target_extract",
+            source_url=pdf_url,
+            published_at=report_date,
+            content_hash=content_hash,
+            related_industries=[],
+            category="research",
+            source_authority=0.9,
+        )
+        .on_conflict_do_nothing(index_elements=["content_hash"])
+        .returning(IndustryNews.id)
+    )
+    result = await db.execute(target_news_stmt)
+    target_news_id = result.scalar_one_or_none()
+    if target_news_id is None:
+        target_news_id = (
+            await db.execute(select(IndustryNews.id).where(IndustryNews.content_hash == content_hash))
+        ).scalar_one_or_none()
+    if not target_news_id:
+        return
+
+    await db.execute(
+        pg_insert(NewsStockRelation)
+        .values(news_id=target_news_id, stock_id=stock_id, relevance=1.0)
+        .on_conflict_do_nothing()
+    )
+    await db.execute(
+        pg_insert(ResearchReportMeta)
+        .values(
+            news_id=target_news_id,
+            stock_id=stock_id,
+            broker=broker,
+            rating=rating,
+            forecast_year_base=forecast_year_base or report_date.year,
+            eps_y1=Decimal(str(target)),
+            eps_y2=None,
+            eps_y3=None,
+            pe_y1=Decimal("1.0"),
+            pe_y2=None,
+            pe_y3=None,
+            pdf_url=pdf_url,
+        )
+        .on_conflict_do_nothing(index_elements=["news_id"])
+    )
+    logger.info(f"[research_pdf_target] {stock_name} {broker} {report_date.date()} target={target:g}")
 
 
 @celery_app.task(name="app.tasks.news_tasks.consume_x_tweets")
@@ -334,7 +488,9 @@ def consume_x_tweets():
 async def _run_consume_x_tweets(batch_limit: int = 100):
     import json as _json
     from datetime import datetime as _dt
+
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.core.config import settings as _settings
     from app.core.database import AsyncSessionLocal
     from app.models.news import IndustryNews
@@ -405,8 +561,9 @@ def crawl_cninfo_disclosures():
 
 
 async def _run_cninfo_disclosures():
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy import select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.core.database import AsyncSessionLocal
     from app.models.news import IndustryNews, NewsStockRelation
     from app.services.news_crawler.cninfo_crawler import CninfoCrawler
@@ -476,6 +633,7 @@ async def _run_cninfo_disclosures():
 async def _fetch_and_save_disclosures(db, code: str, stock_id: int) -> int:
     """财报公告：来源权威，初始 relevance=1.0，作为兜底关联"""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.news import IndustryNews, NewsStockRelation
     from app.services.news_crawler.disclosure_crawler import DisclosureCrawler
 
@@ -525,6 +683,7 @@ async def _fetch_and_save_stock_news(db, code: str, stock_id: int) -> int:
     """单股资讯入库（不建 relation；由 process 阶段按实体匹配建立）"""
     import akshare as ak
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     from app.models.news import IndustryNews
 
     df = await asyncio.to_thread(ak.stock_news_em, symbol=code)
@@ -598,16 +757,17 @@ INSIDER_TITLE_KEYWORDS = ("减持", "增持", "回购", "持股变动", "权益�
 
 async def _extract_insider_trades(db) -> int:
     """对 announcement 类资讯标题命中减持/增持关键词的，批量调 LLM 提取入 insider_trades"""
+    # 取最近 24h 内 announcement 类、未处理过 insider 的资讯
+    from datetime import datetime, timedelta
+
     from sqlalchemy import select
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-    from app.models.news import IndustryNews, NewsStockRelation
-    from app.models.insider_trade import InsiderTrade
-    from app.services.ai_analyzer import insider_extractor
-    from app.models.stock import Stock
 
-    # 取最近 24h 内 announcement 类、未处理过 insider 的资讯
-    from datetime import datetime, timedelta, timezone
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    from app.models.insider_trade import InsiderTrade
+    from app.models.news import IndustryNews, NewsStockRelation
+    from app.models.stock import Stock
+    from app.services.ai_analyzer import insider_extractor
+    cutoff = datetime.now(tz=UTC) - timedelta(hours=24)
     rows = await db.execute(
         select(IndustryNews, NewsStockRelation.stock_id, Stock.code)
         .join(NewsStockRelation, NewsStockRelation.news_id == IndustryNews.id)
@@ -683,14 +843,16 @@ async def _process_pipeline(db) -> int:
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
     from app.models.news import IndustryNews, NewsStockRelation
-    from app.services.news_filter import dedup as dedup_mod
-    from app.services.news_filter import entity_matcher
-    from app.services.news_filter import keyword_builder
-    from app.services.news_filter import llm_scorer
-    from app.services.news_filter import rule_scorer
-    from app.services.news_filter import urgency_classifier
-    from app.services.notifier import dispatcher
     from app.models.stock import Stock
+    from app.services.news_filter import dedup as dedup_mod
+    from app.services.news_filter import (
+        entity_matcher,
+        keyword_builder,
+        llm_scorer,
+        rule_scorer,
+        urgency_classifier,
+    )
+    from app.services.notifier import dispatcher
 
     # 1. 拉取待处理
     result = await db.execute(
@@ -818,7 +980,7 @@ async def _process_pipeline(db) -> int:
 
         # ── P0 资讯升级:L0 催化剂 / 翻译 / L1.5 ──────────────────
         from app.services.news_filter.catalyst_extractor import extract_catalyst
-        from app.services.news_filter.translator import translate_if_needed, detect_lang
+        from app.services.news_filter.translator import detect_lang, translate_if_needed
 
         # L0:对所有 news 跑(纯正则,便宜)
         catalyst_type = extract_catalyst(news.title, news.content)

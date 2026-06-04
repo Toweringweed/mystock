@@ -81,9 +81,10 @@ async def add_to_watchlist(db: AsyncSession, payload: StockCreate) -> Stock | No
 async def remove_from_watchlist(db: AsyncSession, code: str) -> None:
     """从自选股移除并删除该股票所有关联数据"""
     from sqlalchemy import delete
+
     from app.models.analysis import AnalysisReport, ChipDistribution, DivergenceSignal
     from app.models.fundamental import ProfitForecast, StockFundamental
-    from app.models.news import IndustryNews, NewsStockRelation
+    from app.models.news import NewsStockRelation
     from app.models.stock_meta import StockNote
     from app.models.supply_chain import SupplyChain
 

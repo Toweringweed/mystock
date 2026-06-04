@@ -32,6 +32,7 @@ def extract_segments_for_all(self):
     """对所有自选股提取业务分部数据(SOTP 用)"""
     async def _run():
         from sqlalchemy import select
+
         from app.core.database import AsyncSessionLocal
         from app.models.stock import Stock
 
@@ -57,11 +58,12 @@ def extract_segments_task(self, stock_code: str):
     async def _run():
         from sqlalchemy import select
         from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         from app.core.database import AsyncSessionLocal
         from app.models.business_segment import BusinessSegment
         from app.models.stock import Stock
-        from app.services.data_fetcher.annual_report_fetcher import AnnualReportFetcher
         from app.services.ai_analyzer.business_segment_extractor import BusinessSegmentExtractor
+        from app.services.data_fetcher.annual_report_fetcher import AnnualReportFetcher
 
         async with AsyncSessionLocal() as db:
             stock_row = await db.execute(

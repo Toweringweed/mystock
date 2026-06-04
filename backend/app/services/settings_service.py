@@ -1,6 +1,5 @@
 """动态配置服务：DB 覆盖 .env，立即生效"""
 import logging
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert

@@ -8,7 +8,8 @@ from app.models.stock import Stock
 from app.models.target_price_realtime import StockTargetPriceRealtime
 from app.schemas.target_price_realtime import TargetPriceRealtimeRead
 from app.services.target_price_service import (
-    compute_realtime_for_all_watchlist, compute_realtime_for_stock,
+    compute_realtime_for_all_watchlist,
+    compute_realtime_for_stock,
 )
 
 router = APIRouter()
@@ -76,7 +77,7 @@ async def get_target_price_ranking(
     if only_actionable:
         stmt = stmt.where(
             StockTargetPriceRealtime.final_score.isnot(None),
-            StockTargetPriceRealtime.veto_triggered == False,
+            StockTargetPriceRealtime.veto_triggered.is_(False),
         )
     stmt = stmt.order_by(StockTargetPriceRealtime.final_score.desc().nullslast()).limit(limit)
     res = await db.execute(stmt)

@@ -7,6 +7,7 @@
 """
 import asyncio
 import logging
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -27,8 +28,10 @@ def _classify(pct: Decimal | None) -> str | None:
     if pct is None:
         return None
     p = float(pct)
-    if p >= 5: return "beat"
-    if p <= -5: return "miss"
+    if p >= 5:
+        return "beat"
+    if p <= -5:
+        return "miss"
     return "meet"
 
 
@@ -233,8 +236,6 @@ def compute_earnings_returns():
 
 
 # ────────────────── 财报日历扫描 ──────────────────
-
-import re
 
 # 公告标题中的财报披露日期识别模式
 EARNINGS_ANNOUNCE_PATTERNS = [

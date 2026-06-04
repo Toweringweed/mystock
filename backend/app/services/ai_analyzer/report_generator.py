@@ -1,14 +1,14 @@
 """AI 综合分析报告生成器"""
 import json
 import logging
-from datetime import date
+from datetime import UTC, date
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.analysis import AnalysisReport
 from app.models.stock import Stock
-from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -122,9 +122,12 @@ class ReportGenerator:
         self, db: AsyncSession, code: str, stock_id: int | None, ctx: dict
     ) -> None:
         """聚合技术面上下文 — 基础(MA/MACD/RSI/KDJ/布林) + 扩展(量比/动量/相对强度/资金流向)"""
-        from datetime import date as _date, timedelta as _td
+        from datetime import date as _date
+        from datetime import timedelta as _td
+
         from sqlalchemy import select as _select
-        from app.models.kline import StockDailyKline, StockTechnicalIndicator
+
+        from app.models.kline import StockDailyKline
         from app.services.kline_service import get_indicators
 
         # ── 基础指标(沿用旧逻辑,但更细化) ───────────────────────
@@ -216,8 +219,8 @@ class ReportGenerator:
 
         if klines:
             closes = [float(k.close) for k in klines if k.close is not None]
-            highs = [float(k.high) for k in klines if k.high is not None]
-            lows = [float(k.low) for k in klines if k.low is not None]
+            [float(k.high) for k in klines if k.high is not None]
+            [float(k.low) for k in klines if k.low is not None]
             ctx["close_price"] = round(closes[-1], 2) if closes else "N/A"
 
             # 近 30 日相对位置
@@ -298,8 +301,8 @@ class ReportGenerator:
         ctx.setdefault("north_flow_5d", "N/A")
         try:
             import asyncio as _asyncio
+
             import akshare as _ak
-            import pandas as _pd
 
             def _fetch_fund_flow():
                 # market: A股 sh / sz / bj 自动判断
@@ -336,7 +339,6 @@ class ReportGenerator:
 
     async def _collect_context(self, db: AsyncSession, code: str) -> dict:
         from app.services.fundamental_service import get_fundamental
-        from app.services.kline_service import get_indicators
         from app.services.news_service import get_stock_news
 
         ctx: dict = {"code": code, "name": code, "_stock_id": None}
@@ -408,9 +410,10 @@ class ReportGenerator:
         ctx["events_summary"] = "近 7 天无事件"
         if stock_id is not None:
             try:
-                from datetime import datetime, timedelta, timezone
+                from datetime import datetime, timedelta
+
                 from app.models.event import StockEvent
-                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=7)
+                cutoff = datetime.now(tz=UTC) - timedelta(days=7)
                 event_rows = await db.execute(
                     select(StockEvent)
                     .where(StockEvent.stock_id == stock_id)

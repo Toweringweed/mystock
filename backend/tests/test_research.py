@@ -5,7 +5,6 @@ from app.services.data_fetcher.research_report_fetcher import (
     _to_float,
 )
 
-
 # ────────── _detect_forecast_year_base ──────────
 
 def test_detect_forecast_year_base_returns_min_year():

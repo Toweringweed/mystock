@@ -211,7 +211,6 @@ async def fetch_research_via_websearch(
     prompt = _PROMPT_TEMPLATE.format(name=name, code=code, days=days, seen_titles=seen)
 
     raw = ""
-    used_provider = ""
 
     # ── Provider 1: Anthropic 直连 ─────────────────────────────
     ant_key = await _get_setting(db, "anthropic_api_key")
@@ -221,7 +220,6 @@ async def fetch_research_via_websearch(
             raw = await _call_anthropic_web_search(
                 ant_key=ant_key, model=ant_model, prompt=prompt, max_searches=max_searches,
             )
-            used_provider = f"anthropic({ant_model})"
         except Exception as e:
             logger.warning(f"[websearch][{code}] Anthropic 失败,fallback OpenRouter: {e}")
 
@@ -233,7 +231,6 @@ async def fetch_research_via_websearch(
                 raw = await _call_openrouter_online(
                     or_key=or_key, prompt=prompt, max_searches=max_searches,
                 )
-                used_provider = "openrouter(claude-sonnet-4:online)"
             except Exception as e:
                 logger.warning(f"[websearch][{code}] OpenRouter 也失败: {e}")
 
