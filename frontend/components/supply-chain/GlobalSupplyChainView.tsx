@@ -40,6 +40,9 @@ const EXTERNAL_NODE_GAP_Y = 70;
 const importanceColor = (imp: SupplyChainEdge["importance"]) =>
   imp === "high" ? "#ef5350" : imp === "medium" ? "#f59e0b" : "#9ca3af";
 
+const eventBorderColor = (urgentCount: number, eventCount: number) =>
+  urgentCount > 0 ? "#ef5350" : eventCount > 0 ? "#f59e0b" : null;
+
 // ── 布局计算:行业聚簇 + 外部公司分列 ───────────────────────────────────────────
 function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
   nodes: Node[];
@@ -109,6 +112,7 @@ function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
       const x = CLUSTER_PADDING + col * (NODE_W + NODE_GAP_X);
       const y = CLUSTER_PADDING + 30 + row + row * NODE_GAP_Y + row * NODE_H;
       const isFocus = focusCode === code;
+      const eventColor = eventBorderColor(meta.urgent_event_count, meta.recent_event_count);
       nodes.push({
         id: code,
         parentNode: groupId,
@@ -123,16 +127,21 @@ function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
             >
               <div className="text-[13px] font-semibold leading-tight">{meta.name}</div>
               <div className="text-[10px] text-gray-500 mt-0.5">{meta.code}</div>
+              {meta.recent_event_count > 0 && (
+                <div className="mt-0.5 text-[10px] font-medium text-orange-600">
+                  {meta.urgent_event_count > 0 ? "紧急" : "动态"} {meta.recent_event_count}
+                </div>
+              )}
             </Link>
           ),
         },
         style: {
-          background: isFocus ? "#fff7ed" : "#f0f7ff",
-          border: `2px solid ${isFocus ? "#f59e0b" : "#58a6ff"}`,
+          background: meta.urgent_event_count > 0 ? "#fef2f2" : isFocus ? "#fff7ed" : "#f0f7ff",
+          border: `2px solid ${eventColor || (isFocus ? "#f59e0b" : "#58a6ff")}`,
           color: "#1f2937",
           borderRadius: 8,
           width: NODE_W,
-          height: NODE_H,
+          height: meta.recent_event_count > 0 ? NODE_H + 14 : NODE_H,
           padding: 6,
           fontSize: 12,
         },
@@ -186,14 +195,26 @@ function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
   upstreamExt.forEach((ext, idx) => {
     const x = upstreamX;
     const y = idx * EXTERNAL_NODE_GAP_Y;
+    const eventColor = eventBorderColor(ext.urgent_event_count, ext.recent_event_count);
     nodes.push({
       id: ext.code,
       position: { x, y },
-      data: { label: ext.name.length > 22 ? ext.name.slice(0, 22) + "…" : ext.name },
+      data: {
+        label: (
+          <div>
+            <div>{ext.name.length > 22 ? ext.name.slice(0, 22) + "…" : ext.name}</div>
+            {ext.recent_event_count > 0 && (
+              <div className="mt-0.5 text-[10px] font-medium text-orange-600">
+                动态 {ext.recent_event_count}
+              </div>
+            )}
+          </div>
+        ),
+      },
       style: {
-        background: "#f9fafb",
-        border: "1px solid #d1d5db",
-        color: "#6b7280",
+        background: ext.urgent_event_count > 0 ? "#fef2f2" : ext.recent_event_count > 0 ? "#fffbeb" : "#f9fafb",
+        border: `1.5px solid ${eventColor || "#d1d5db"}`,
+        color: eventColor ? "#7c2d12" : "#6b7280",
         borderRadius: 6,
         width: EXTERNAL_LANE_WIDTH,
         fontSize: 11,
@@ -210,13 +231,25 @@ function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
   downstreamExt.forEach((ext, idx) => {
     const x = downstreamX;
     const y = idx * EXTERNAL_NODE_GAP_Y;
+    const eventColor = eventBorderColor(ext.urgent_event_count, ext.recent_event_count);
     nodes.push({
       id: ext.code,
       position: { x, y },
-      data: { label: ext.name.length > 22 ? ext.name.slice(0, 22) + "…" : ext.name },
+      data: {
+        label: (
+          <div>
+            <div>{ext.name.length > 22 ? ext.name.slice(0, 22) + "…" : ext.name}</div>
+            {ext.recent_event_count > 0 && (
+              <div className="mt-0.5 text-[10px] font-medium text-red-600">
+                动态 {ext.recent_event_count}
+              </div>
+            )}
+          </div>
+        ),
+      },
       style: {
-        background: "#fef2f2",
-        border: "1px solid #fecaca",
+        background: ext.recent_event_count > 0 ? "#fff7ed" : "#fef2f2",
+        border: `1.5px solid ${eventColor || "#fecaca"}`,
         color: "#7f1d1d",
         borderRadius: 6,
         width: EXTERNAL_LANE_WIDTH,
@@ -238,18 +271,19 @@ function buildLayout(data: GlobalSupplyChain, focusCode: string | null): {
     if (!fromExists || !toExists) continue;
 
     const isFocusEdge = focusCode && (e.from_code === focusCode || e.to_code === focusCode);
-    const stroke = importanceColor(e.importance);
+    const eventColor = eventBorderColor(e.urgent_event_count, e.recent_event_count);
+    const stroke = eventColor || importanceColor(e.importance);
     edges.push({
       id: `${e.from_code}->${e.to_code}::${e.product_desc?.slice(0, 8) || ""}`,
       source: e.from_code,
       target: e.to_code,
-      animated: isFocusEdge || e.both_listed,
+      animated: Boolean(isFocusEdge || e.both_listed || e.recent_event_count > 0),
       label: e.product_desc ? (e.product_desc.length > 14 ? e.product_desc.slice(0, 14) + "…" : e.product_desc) : "",
       labelStyle: { fontSize: 10, fill: "#4b5563" },
       labelBgStyle: { fill: "rgba(255, 255, 255, 0.85)", fillOpacity: 0.85 },
       style: {
         stroke,
-        strokeWidth: e.both_listed ? 2 : 1,
+        strokeWidth: e.recent_event_count > 0 ? 2.5 : e.both_listed ? 2 : 1,
         opacity: focusCode && !isFocusEdge ? 0.15 : 0.85,
       },
       markerEnd: {
@@ -329,8 +363,44 @@ export function GlobalSupplyChainView() {
             <Stat label="关联边" value={data.stats.edge_count} color="text-gray-700" />
             <Stat label="自选股互联" value={data.stats.cross_watchlist_edges} color="text-[#ef5350]" />
             <Stat label="行业聚簇" value={data.stats.industry_count} color="text-[#26a69a]" />
+            <Stat label="近期动态" value={data.stats.recent_event_count} color="text-orange-600" />
           </div>
         </div>
+
+        {data.recent_events.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold text-gray-700 mb-2">供应链动态</h3>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {data.recent_events.slice(0, 8).map((ev) => (
+                <Link
+                  key={`${ev.news_id}-${ev.stock_code}-${ev.company_name}`}
+                  href={`/news/${ev.news_id}`}
+                  className="block rounded border border-orange-200 bg-orange-50 px-2 py-1.5 hover:bg-orange-100"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-orange-800 truncate">
+                      {ev.company_name}
+                    </span>
+                    <span className={clsx(
+                      "shrink-0 rounded px-1 text-[10px]",
+                      ev.urgency === "urgent"
+                        ? "bg-[#ef5350]/15 text-[#ef5350]"
+                        : "bg-amber-100 text-amber-700"
+                    )}>
+                      {ev.urgency === "urgent" ? "紧急" : "重要"}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-gray-700">
+                    {ev.title}
+                  </p>
+                  <p className="mt-1 text-[10px] text-gray-500">
+                    影响 {ev.stock_name} · 相关度 {(ev.relevance * 100).toFixed(0)}%
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <h3 className="text-xs font-semibold text-gray-700 mb-2">🔍 视图过滤</h3>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import useSWR, { mutate as globalMutate } from "swr";
 import Link from "next/link";
 import { clsx } from "clsx";
@@ -16,6 +16,7 @@ import { EarningsTrackPanel } from "@/components/stock/EarningsTrackPanel";
 import { EstimateRevisionsPanel } from "@/components/stock/EstimateRevisionsPanel";
 import { MoatChangePanel } from "@/components/stock/MoatChangePanel";
 import { TargetPricePanel } from "@/components/stock/TargetPricePanel";
+import { supplyChainApi, SupplyChain, SupplyChainEventSummary, SupplyChainNode } from "@/lib/api/supply_chain";
 
 // ─── 通用 UI ──────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,274 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   return (
     <div className={clsx("bg-[#f6f8fa] rounded-xl border border-gray-200 p-4", className)}>
       {children}
+    </div>
+  );
+}
+
+const relationMeta: Record<SupplyChainNode["relation_type"], {
+  label: string;
+  role: string;
+  tone: string;
+}> = {
+  upstream: { label: "上游", role: "供给约束", tone: "border-blue-200 bg-blue-50 text-blue-700" },
+  downstream: { label: "下游", role: "需求验证", tone: "border-red-200 bg-red-50 text-red-700" },
+  competitor: { label: "竞品", role: "景气参照", tone: "border-amber-200 bg-amber-50 text-amber-700" },
+};
+
+function formatSupplyChainTime(value: string | null) {
+  if (!value) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function dedupeSupplyChainEvents(events: SupplyChainEventSummary[]) {
+  const byNewsId = new Map<number, SupplyChainEventSummary & { companies: string[] }>();
+
+  for (const event of events) {
+    const current = byNewsId.get(event.news_id);
+    if (current) {
+      if (!current.companies.includes(event.company_name)) {
+        current.companies.push(event.company_name);
+      }
+      continue;
+    }
+    byNewsId.set(event.news_id, { ...event, companies: [event.company_name] });
+  }
+
+  return Array.from(byNewsId.values()).sort((a, b) => {
+    const urgentRank = (b.urgency === "urgent" ? 2 : b.urgency === "important" ? 1 : 0)
+      - (a.urgency === "urgent" ? 2 : a.urgency === "important" ? 1 : 0);
+    if (urgentRank !== 0) return urgentRank;
+    return (b.importance_score ?? 0) - (a.importance_score ?? 0);
+  });
+}
+
+function SupplyChainInlinePanel({ code }: { code: string }) {
+  const { data, isLoading, mutate } = useSWR<SupplyChain>(
+    `stock-detail-supply-chain-${code}`,
+    () => supplyChainApi.get(code),
+    { revalidateOnFocus: false }
+  );
+  const [refreshingSupplyChain, setRefreshingSupplyChain] = useState(false);
+  const uniqueEvents = useMemo(
+    () => dedupeSupplyChainEvents(data?.recent_events ?? []),
+    [data?.recent_events]
+  );
+
+  const handleRefreshSupplyChain = async () => {
+    setRefreshingSupplyChain(true);
+    try {
+      await supplyChainApi.refresh(code);
+      window.setTimeout(() => {
+        mutate();
+      }, 2000);
+    } finally {
+      window.setTimeout(() => setRefreshingSupplyChain(false), 1200);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-[#f6f8fa] p-4">
+        <p className="text-xs text-gray-400">供应链判断加载中...</p>
+      </div>
+    );
+  }
+
+  const allNodes = [
+    ...(data?.upstream ?? []),
+    ...(data?.downstream ?? []),
+    ...(data?.competitors ?? []),
+  ];
+  const highImportanceNodes = allNodes.filter((node) => node.importance === "high");
+  const activeNodes = allNodes
+    .filter((node) => node.recent_event_count > 0)
+    .sort((a, b) => (b.urgent_event_count - a.urgent_event_count) || (b.recent_event_count - a.recent_event_count))
+    .slice(0, 6);
+  const importantEventCount = uniqueEvents.filter((event) => event.urgency === "urgent" || event.urgency === "important").length;
+  const downstreamActive = activeNodes.filter((node) => node.relation_type === "downstream").length;
+  const upstreamActive = activeNodes.filter((node) => node.relation_type === "upstream").length;
+  const competitorActive = activeNodes.filter((node) => node.relation_type === "competitor").length;
+
+  if (!allNodes.length) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-[#f6f8fa] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-gray-700">供应链关系待补齐</p>
+            <p className="mt-1 text-xs text-gray-500">该股还没有上游、下游、竞品基础关系，资讯匹配会等基础关系生成后自动回填。</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRefreshSupplyChain}
+              disabled={refreshingSupplyChain}
+              className="rounded border border-[#58a6ff]/40 px-2.5 py-1 text-xs font-medium text-[#58a6ff] hover:bg-[#58a6ff]/10 disabled:opacity-50"
+            >
+              {refreshingSupplyChain ? "已提交" : "补齐供应链"}
+            </button>
+            <Link href="/supply-chain" className="text-xs text-[#58a6ff] hover:underline">全景图</Link>
+          </div>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-gray-500">
+          这个模块的基础层是关系图谱，不依赖新闻。补齐后会先显示关键上下游公司；后续资讯出现时，再在这些关系上高亮。
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-800">供应链判断</p>
+          <p className="mt-1 text-xs leading-relaxed text-gray-500">
+            用上下游和竞品资讯判断行业景气是否正在向本股传导，重点看需求侧验证、供给侧约束和竞品股价/订单信号。
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={handleRefreshSupplyChain}
+            disabled={refreshingSupplyChain}
+            className="rounded border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-[#f6f8fa] disabled:opacity-50"
+          >
+            {refreshingSupplyChain ? "刷新中" : "重提关系"}
+          </button>
+          <Link href="/supply-chain" className="text-xs font-medium text-[#58a6ff] hover:underline">
+            打开全景图
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid gap-0 md:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="border-b border-gray-100 p-4 md:border-b-0 md:border-r">
+          <div className="grid grid-cols-3 gap-2 md:grid-cols-1">
+            {[
+              { label: "上游", count: data?.upstream.length ?? 0, sub: `${upstreamActive} 个活跃` },
+              { label: "下游", count: data?.downstream.length ?? 0, sub: `${downstreamActive} 个活跃` },
+              { label: "竞品", count: data?.competitors.length ?? 0, sub: `${competitorActive} 个活跃` },
+            ].map((item) => (
+              <div key={item.label} className="rounded-md bg-[#f6f8fa] px-3 py-2">
+                <p className="text-[11px] text-gray-500">{item.label}</p>
+                <p className="mt-0.5 text-lg font-semibold leading-none text-gray-800">{item.count}</p>
+                <p className="mt-1 text-[11px] text-gray-400">{item.sub}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 px-3 py-2">
+            <p className="text-[11px] font-medium text-orange-800">近期信号</p>
+            <p className="mt-1 text-xs text-orange-700">
+              {uniqueEvents.length > 0
+                ? `${uniqueEvents.length} 条去重资讯，${importantEventCount} 条重要`
+                : "暂无命中资讯"}
+            </p>
+          </div>
+        </div>
+
+        <div className="min-w-0 p-4">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <div className="rounded-md border border-gray-200 bg-[#f6f8fa] p-3">
+              <p className="text-xs font-semibold text-gray-700">先看需求侧</p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                {downstreamActive > 0
+                  ? "下游客户/应用端已有新闻命中，适合继续核对订单、扩产和资本开支是否传导到本股。"
+                  : "暂未看到下游合作方的近期命中，需求验证还需要更多订单和产能利用率证据。"}
+              </p>
+            </div>
+            <div className="rounded-md border border-gray-200 bg-[#f6f8fa] p-3">
+              <p className="text-xs font-semibold text-gray-700">再看供给侧</p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                {upstreamActive > 0
+                  ? "上游供应商出现资讯，需判断是成本压力、交付瓶颈，还是国产替代带来的议价改善。"
+                  : "上游暂无近期命中，当前更应关注核心材料/零部件的供给稳定性和价格变化。"}
+              </p>
+            </div>
+            <div className="rounded-md border border-gray-200 bg-[#f6f8fa] p-3">
+              <p className="text-xs font-semibold text-gray-700">最后看竞品</p>
+              <p className="mt-1 text-xs leading-relaxed text-gray-500">
+                {competitorActive > 0
+                  ? "竞品出现资讯，可作为行业景气和估值弹性的横向参照，但不能直接等同本股受益。"
+                  : "竞品暂无强信号，行业联动暂时不明显，需结合股价相对强度确认。"}
+              </p>
+            </div>
+          </div>
+
+          {uniqueEvents.length > 0 ? (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-gray-700">资讯冲击（按新闻去重）</p>
+                <p className="text-[11px] text-gray-400">同一新闻命中多个合作方时合并展示</p>
+              </div>
+              <div className="grid gap-2 lg:grid-cols-2">
+                {uniqueEvents.slice(0, 4).map((event) => (
+                  <Link
+                    key={event.news_id}
+                    href={`/news/${event.news_id}`}
+                    className="block rounded-md border border-gray-200 bg-white px-3 py-2 hover:border-orange-300 hover:bg-orange-50"
+                  >
+                    <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                      {event.companies.slice(0, 3).map((company) => (
+                        <span key={company} className="rounded bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                          {company}
+                        </span>
+                      ))}
+                      {event.companies.length > 3 ? (
+                        <span className="text-[10px] text-gray-400">+{event.companies.length - 3}</span>
+                      ) : null}
+                      <span className="ml-auto text-[10px] text-gray-400">{formatSupplyChainTime(event.published_at)}</span>
+                    </div>
+                    <p className="line-clamp-2 text-xs font-medium leading-relaxed text-gray-800">{event.title}</p>
+                    {event.impact_summary ? (
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-gray-500">{event.impact_summary}</p>
+                    ) : null}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-semibold text-gray-700">关键公司矩阵</p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {(activeNodes.length ? activeNodes : highImportanceNodes.slice(0, 6)).map((node) => {
+                const meta = relationMeta[node.relation_type];
+                return (
+                  <div key={`${node.relation_type}-${node.company_name}`} className="rounded-md border border-gray-200 bg-[#f6f8fa] px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-gray-800">
+                          {node.company_name}{node.company_code ? ` · ${node.company_code}` : ""}
+                        </p>
+                        <p className="mt-1 line-clamp-1 text-[11px] text-gray-500">{node.product_desc ?? "合作内容待补充"}</p>
+                      </div>
+                      <span className={clsx("shrink-0 rounded border px-1.5 py-0.5 text-[10px]", meta.tone)}>
+                        {meta.label} · {meta.role}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-gray-500">
+                      <span>重要性：{node.importance === "high" ? "高" : node.importance === "medium" ? "中" : "低"}</span>
+                      {node.recent_event_count > 0 ? (
+                        <span className="text-orange-700">近期 {node.recent_event_count} 条</span>
+                      ) : (
+                        <span>近期无命中</span>
+                      )}
+                      {node.latest_news_id ? (
+                        <Link href={`/news/${node.latest_news_id}`} className="text-[#58a6ff] hover:underline">最新资讯</Link>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -754,6 +1023,11 @@ export function StockDetailView({ code }: { code: string }) {
           )}
         </div>
 
+        <section className="mb-5">
+          <SectionTitle>供应链判断 · 上下游联动</SectionTitle>
+          <SupplyChainInlinePanel code={code} />
+        </section>
+
         {/* AI 综合结论(从 sticky 顶栏移出,避免滚动时遮挡其他段落) */}
         {report && (
           <section className="mb-5">
@@ -967,11 +1241,6 @@ export function StockDetailView({ code }: { code: string }) {
             <EarningsTrackPanel code={code} />
           </div>
 
-          {/* 上下游供应商已迁移至独立的全局供应链页面(/supply-chain),便于跨自选股关联 */}
-          <p className="text-xs text-gray-400 mt-3 leading-relaxed">
-            上下游供应商关系已迁移至 <Link href="/supply-chain" className="text-[#58a6ff] hover:underline">📊 全局供应链图</Link>,
-            可查看自选股按行业聚簇的整体上下游链路。
-          </p>
         </section>
 
         {/* ── 维度 4 动态赔率已并入"主决策依据·估值赔率"段(2026-05) ── */}
@@ -1179,7 +1448,6 @@ export function StockDetailView({ code }: { code: string }) {
 
       {/* ── 右侧边栏 ───────────────────────────────────────── */}
       <aside className="w-80 shrink-0 border-l border-gray-200 overflow-y-auto pl-5">
-
         {/* 催化剂 */}
         {report?.full_report?.catalysts?.length ? (
           <div className="mb-6">

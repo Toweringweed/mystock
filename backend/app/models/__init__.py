@@ -27,7 +27,15 @@ from app.models.stock import Stock
 from app.models.stock_alias import StockAlias
 from app.models.stock_meta import StockNote
 from app.models.stock_universe import StockUniverse
-from app.models.supply_chain import SupplyChain
+from app.models.supply_chain import (
+    SupplyChain,
+    SupplyChainCompany,
+    SupplyChainCompanyAlias,
+    SupplyChainEventImpact,
+    SupplyChainEvidence,
+    SupplyChainNewsLink,
+    SupplyChainRelationship,
+)
 from app.models.tag import StockTag, Tag
 from app.models.target_price_realtime import StockTargetPriceRealtime
 
@@ -43,6 +51,12 @@ __all__ = [
     "IndustryNews",
     "NewsStockRelation",
     "SupplyChain",
+    "SupplyChainCompany",
+    "SupplyChainCompanyAlias",
+    "SupplyChainRelationship",
+    "SupplyChainEvidence",
+    "SupplyChainNewsLink",
+    "SupplyChainEventImpact",
     "StockNote",
     "AppSetting",
     "StockUniverse",

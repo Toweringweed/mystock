@@ -90,6 +90,18 @@ celery_app.conf.update(
             "task": "app.tasks.news_tasks.crawl_all_sources",
             "schedule": crontab(minute=0, hour=f"*/{settings.news_crawl_interval_hours}"),
         },
+        # 供应链智能层：同步关系实体，并把近期资讯匹配到上下游/竞品关系。
+        "refresh-supply-chain-intelligence": {
+            "task": "app.tasks.supply_chain_tasks.refresh_supply_chain_intelligence",
+            "schedule": crontab(minute=20, hour=f"*/{settings.news_crawl_interval_hours}"),
+            "args": (14,),
+        },
+        # 供应链覆盖率自愈：每天晚间为缺少基础上下游关系的自选股分批排队提取。
+        "backfill-watchlist-supply-chains": {
+            "task": "app.tasks.supply_chain_tasks.backfill_watchlist_supply_chains",
+            "schedule": crontab(hour=20, minute=30),
+            "kwargs": {"limit": 8, "force": False},
+        },
         # 基本面数据更新（每日9:00）
         "update-fundamentals": {
             "task": "app.tasks.data_tasks.update_all_fundamentals",

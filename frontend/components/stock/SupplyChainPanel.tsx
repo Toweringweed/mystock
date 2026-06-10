@@ -1,7 +1,8 @@
 "use client";
 
 import useSWR from "swr";
-import { useCallback } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import ReactFlow, {
   Node,
   Edge,
@@ -13,7 +14,7 @@ import ReactFlow, {
   BackgroundVariant,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { supplyChainApi, SupplyChainNode } from "@/lib/api/supply_chain";
+import { supplyChainApi, SupplyChainEventSummary, SupplyChainNode } from "@/lib/api/supply_chain";
 import { clsx } from "clsx";
 
 interface Props {
@@ -67,16 +68,21 @@ function buildGraph(
     const c = NODE_COLORS[colorKey];
     const y = 300 - ((upstream.slice(0, 6).length - 1) / 2) * GAP + i * GAP;
 
+    const hasEvent = node.recent_event_count > 0;
+    const eventBorder = node.urgent_event_count > 0 ? "#ef5350" : hasEvent ? "#f59e0b" : c.border;
+
     nodes.push({
       id,
       data: {
-        label: `${node.company_name}${node.percentage ? `\n${node.percentage}%` : ""}`,
+        label: `${node.company_name}${node.percentage ? `\n${node.percentage}%` : ""}${
+          hasEvent ? `\n动态 ${node.recent_event_count}` : ""
+        }`,
       },
       position: { x: UP_X, y },
       style: {
-        background: c.bg,
-        border: `1.5px solid ${c.border}`,
-        color: c.text,
+        background: node.urgent_event_count > 0 ? "#3a1f1f" : hasEvent ? "#332b16" : c.bg,
+        border: `1.5px solid ${eventBorder}`,
+        color: node.urgent_event_count > 0 ? "#ef5350" : hasEvent ? "#f59e0b" : c.text,
         borderRadius: 6,
         padding: "6px 12px",
         fontSize: 11,
@@ -89,10 +95,10 @@ function buildGraph(
       id: `e-up-${node.id}`,
       source: id,
       target: "center",
-      animated: node.importance === "high",
+      animated: node.importance === "high" || hasEvent,
       style: {
-        stroke: c.border,
-        strokeWidth: node.importance === "high" ? 2 : 1,
+        stroke: eventBorder,
+        strokeWidth: hasEvent ? 2.5 : node.importance === "high" ? 2 : 1,
         opacity: 0.7,
       },
       label: node.product_desc?.slice(0, 10),
@@ -108,16 +114,21 @@ function buildGraph(
     const c = NODE_COLORS[colorKey];
     const y = 300 - ((downstream.slice(0, 6).length - 1) / 2) * GAP + i * GAP;
 
+    const hasEvent = node.recent_event_count > 0;
+    const eventBorder = node.urgent_event_count > 0 ? "#ef5350" : hasEvent ? "#f59e0b" : c.border;
+
     nodes.push({
       id,
       data: {
-        label: `${node.company_name}${node.percentage ? `\n${node.percentage}%` : ""}`,
+        label: `${node.company_name}${node.percentage ? `\n${node.percentage}%` : ""}${
+          hasEvent ? `\n动态 ${node.recent_event_count}` : ""
+        }`,
       },
       position: { x: DOWN_X, y },
       style: {
-        background: c.bg,
-        border: `1.5px solid ${c.border}`,
-        color: c.text,
+        background: node.urgent_event_count > 0 ? "#3a1f1f" : hasEvent ? "#332b16" : c.bg,
+        border: `1.5px solid ${eventBorder}`,
+        color: node.urgent_event_count > 0 ? "#ef5350" : hasEvent ? "#f59e0b" : c.text,
         borderRadius: 6,
         padding: "6px 12px",
         fontSize: 11,
@@ -130,10 +141,10 @@ function buildGraph(
       id: `e-down-${node.id}`,
       source: "center",
       target: id,
-      animated: node.importance === "high",
+      animated: node.importance === "high" || hasEvent,
       style: {
-        stroke: c.border,
-        strokeWidth: node.importance === "high" ? 2 : 1,
+        stroke: eventBorder,
+        strokeWidth: hasEvent ? 2.5 : node.importance === "high" ? 2 : 1,
         opacity: 0.7,
       },
       label: node.product_desc?.slice(0, 10),
@@ -202,6 +213,10 @@ export function SupplyChainPanel({ code }: Props) {
         </div>
       ) : (
         <>
+          {data.recent_events.length > 0 && (
+            <SupplyChainEvents events={data.recent_events} />
+          )}
+
           {/* 图谱 */}
           <SupplyChainGraph
             code={code}
@@ -221,6 +236,44 @@ export function SupplyChainPanel({ code }: Props) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SupplyChainEvents({ events }: { events: SupplyChainEventSummary[] }) {
+  return (
+    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-orange-800">供应链动态</h4>
+        <span className="text-xs text-orange-700">近 14 天 · {events.length} 条</span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+        {events.slice(0, 6).map((ev) => (
+          <Link
+            key={`${ev.news_id}-${ev.company_name}-${ev.stock_code}`}
+            href={`/news/${ev.news_id}`}
+            className="block rounded-md border border-orange-200 bg-white px-3 py-2 hover:border-orange-300 hover:bg-orange-50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-orange-800 truncate">{ev.company_name}</span>
+              <span
+                className={clsx(
+                  "shrink-0 rounded px-1.5 py-0.5 text-[10px]",
+                  ev.urgency === "urgent"
+                    ? "bg-[#ef5350]/15 text-[#ef5350]"
+                    : "bg-amber-100 text-amber-700"
+                )}
+              >
+                {ev.urgency === "urgent" ? "紧急" : "重要"}
+              </span>
+            </div>
+            <p className="mt-1 line-clamp-2 text-xs leading-snug text-gray-700">{ev.title}</p>
+            {ev.impact_summary && (
+              <p className="mt-1 line-clamp-1 text-[11px] text-gray-500">{ev.impact_summary}</p>
+            )}
+          </Link>
+        ))}
+      </div>
     </div>
   );
 }
@@ -314,6 +367,14 @@ function NodeList({
               {n.product_desc && (
                 <p className="text-xs text-gray-500">{n.product_desc}</p>
               )}
+              {n.recent_event_count > 0 && n.latest_news_id && (
+                <Link
+                  href={`/news/${n.latest_news_id}`}
+                  className="mt-1 inline-block text-xs text-orange-600 hover:underline"
+                >
+                  近期动态：{n.latest_event_title || `${n.recent_event_count} 条相关资讯`}
+                </Link>
+              )}
             </div>
           </li>
         ))}
@@ -334,5 +395,3 @@ function LegendItem({ color, label }: { color: string; label: string }) {
   );
 }
 
-// useState 需要在组件内部，补充导入
-import { useState } from "react";

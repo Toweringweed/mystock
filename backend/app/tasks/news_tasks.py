@@ -184,6 +184,14 @@ def crawl_all_sources():
         from app.services.stock_service import get_all_watchlist_codes_with_info
 
         async with AsyncSessionLocal() as db:
+            try:
+                cailianshe_saved = await _fetch_and_save_cailianshe_news(db)
+                if cailianshe_saved:
+                    logger.info(f"[cailianshe] 财联社电报新增 {cailianshe_saved} 条")
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.error(f"[cailianshe] 财联社电报抓取失败: {e}")
+
             stocks = await get_all_watchlist_codes_with_info(db)
             for stock in stocks:
                 try:
@@ -728,6 +736,48 @@ async def _fetch_and_save_stock_news(db, code: str, stock_id: int) -> int:
     return saved
 
 
+async def _fetch_and_save_cailianshe_news(db) -> int:
+    """财联社电报全局资讯入库；实体匹配由 process_pending_news 统一处理。"""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.models.news import IndustryNews
+    from app.services.news_crawler.cailianshe_crawler import CailiansheCrawler
+
+    crawler = CailiansheCrawler()
+    items = await crawler.fetch_latest(limit=50)
+    saved = 0
+
+    for item in items:
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+
+        source = str(item.get("source") or "cailianshe").strip()[:50]
+        source_url = item.get("source_url")
+        dedup_key = source_url or title
+        content_hash = hashlib.sha256(f"{source}:{dedup_key}".encode()).hexdigest()
+
+        stmt = pg_insert(IndustryNews).values(
+            title=title,
+            content=item.get("content"),
+            summary=item.get("summary"),
+            source=source,
+            source_url=source_url,
+            published_at=item.get("published_at") or datetime.now(),
+            sentiment=item.get("sentiment"),
+            related_industries=item.get("related_industries") or [],
+            content_hash=content_hash,
+            category=item.get("category") or "news",
+            source_authority=item.get("source_authority"),
+        ).on_conflict_do_nothing(index_elements=["content_hash"])
+        result = await db.execute(stmt)
+        if result.rowcount:
+            saved += 1
+
+    await db.flush()
+    return saved
+
+
 # ════════════════════════════════════════════════════════════════
 # 2. 处理阶段（去重 → 实体匹配 → 规则打分 → LLM → 分级 → 推送）
 # ════════════════════════════════════════════════════════════════
@@ -1090,6 +1140,17 @@ async def _process_pipeline(db) -> int:
                 _sel(IndustryNews).where(IndustryNews.id == news_id)
             )
             updated = updated_row.scalar_one()
+            try:
+                from app.services.supply_chain_service import link_news_to_supply_chain
+
+                await link_news_to_supply_chain(
+                    db,
+                    updated,
+                    importance=importance,
+                    urgency=urgency,
+                )
+            except Exception as e:
+                logger.error(f"[process] 供应链资讯关联失败 news_id={news_id}: {e}")
 
             if urgency == "urgent":
                 try:
